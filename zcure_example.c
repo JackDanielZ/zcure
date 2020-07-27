@@ -13,6 +13,8 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  zcure_init();
+
   fd = zcure_connect(argv[1], argv[2]);
   if (fd == -1)
   {
