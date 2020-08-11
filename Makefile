@@ -6,7 +6,7 @@ default: all
 
 CFLAGS := -Wall -Wextra -g3 -fvisibility=default -fPIC -I.
 
-LDFLAGS := -L$(BUILD) -lzcure -lssl -lcrypto
+LDFLAGS := -L$(BUILD) -lzcure -lssl -lcrypto -lcurl
 
 all: $(BUILD)/libzcure.so $(BUILD)/zcure $(BUILD)/zcure_server
 

@@ -4,14 +4,29 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <curl/curl.h>
 
-#include <openssl/bio.h>
 #include <openssl/pem.h>
+#include <openssl/x509v3.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/crypto.h>
+#include <openssl/lhash.h>
+#include <openssl/objects.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/x509.h>
+#include <openssl/pkcs12.h>
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
 
 #include "zcure_client.h"
 #include "zcure_common.h"
+
+typedef struct
+{
+  unsigned char *data;
+  unsigned int size;
+} MemoryStruct;
 
 static BIO *_bio_output = NULL;
 static unsigned char _server_cert[100*1024] = {0};
@@ -59,8 +74,65 @@ exit:
   return sfd;
 }
 
+static size_t
+_curl_write_data(void *contents, size_t size, size_t nmemb, void *userp)
+{
+  size_t realsize = size * nmemb;
+  MemoryStruct *mem = (MemoryStruct *)userp;
+
+  unsigned char *ptr = realloc(mem->data, mem->size + realsize + 1);
+  if(ptr == NULL)
+  {
+    /* out of memory! */
+    printf("not enough memory (realloc returned NULL)\n");
+    return 0;
+  }
+
+  mem->data = ptr;
+  memcpy(&(mem->data[mem->size]), contents, realsize);
+  mem->size += realsize;
+  mem->data[mem->size] = 0;
+
+  return realsize;
+}
+
+static int
+_curl_download(const char *uri, MemoryStruct *mem)
+{
+  CURL *curl_handle;
+
+  curl_global_init(CURL_GLOBAL_ALL);
+
+  mem->size = 0;
+
+  /* init the curl session */
+  curl_handle = curl_easy_init();
+
+  /* set URL to get here */
+  curl_easy_setopt(curl_handle, CURLOPT_URL, uri);
+
+  /* disable progress meter, set to 0L to enable it */
+  curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
+
+  /* send all data to this function  */
+  curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _curl_write_data);
+
+  /* write the page body to the memory handle */
+  curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, mem);
+
+  /* get it! */
+  curl_easy_perform(curl_handle);
+
+  /* cleanup curl stuff */
+  curl_easy_cleanup(curl_handle);
+
+  curl_global_cleanup();
+
+  return 0;
+}
+
 static X509 *
-_certificate_retrieve(int fd)
+_main_certificate_retrieve(int fd)
 {
   BIO *bio = NULL;
   char op = CERT_GET_OP;
@@ -85,11 +157,138 @@ _certificate_retrieve(int fd)
   return x_cert;
 }
 
+static int
+_append_ia5(STACK_OF(OPENSSL_STRING) **sk, const ASN1_IA5STRING *email)
+{
+  char *emtmp;
+
+  /* First some sanity checks */
+  if (email->type != V_ASN1_IA5STRING) return 1;
+  if (!email->data || !email->length) return 1;
+
+  if (*sk == NULL) *sk = sk_OPENSSL_STRING_new_null();
+  if (*sk == NULL) return 0;
+
+  /* Don't add duplicates */
+  if (sk_OPENSSL_STRING_find(*sk, (char *)email->data) != -1) return 1;
+
+  emtmp = OPENSSL_strdup((char *)email->data);
+  if (emtmp == NULL || !sk_OPENSSL_STRING_push(*sk, emtmp))
+  {
+    OPENSSL_free(emtmp); /* free on push failure */
+    X509_email_free(*sk);
+    *sk = NULL;
+    return 0;
+  }
+
+  return 1;
+}
+
+static STACK_OF(OPENSSL_STRING) *
+_X509_get_aia(X509 *x)
+{
+  AUTHORITY_INFO_ACCESS *info;
+  STACK_OF(OPENSSL_STRING) *ret = NULL;
+  int i;
+
+  info = X509_get_ext_d2i(x, NID_info_access, NULL, NULL);
+  if (!info) return NULL;
+
+  for (i = 0; i < sk_ACCESS_DESCRIPTION_num(info); i++)
+  {
+    ACCESS_DESCRIPTION *ad = sk_ACCESS_DESCRIPTION_value(info, i);
+    if (OBJ_obj2nid(ad->method) == NID_ad_ca_issuers)
+    {
+      if (ad->location->type == GEN_URI)
+      {
+        if (!_append_ia5(&ret, ad->location->d.uniformResourceIdentifier))
+          break;
+      }
+    }
+  }
+  AUTHORITY_INFO_ACCESS_free(info);
+  return ret;
+}
+
+static STACK_OF(X509) *
+_x509_extract(MemoryStruct *mem)
+{
+  X509 *x;
+  PKCS7 *p7;
+  BIO *bio;
+  STACK_OF(X509) *certs = sk_X509_new_null();
+
+  bio = BIO_new_mem_buf(mem->data, mem->size);
+  x = d2i_X509_bio(bio, NULL);
+  BIO_free(bio);
+  if (x)
+  {
+    sk_X509_push(certs, x);
+    return certs;
+  }
+
+  bio = BIO_new_mem_buf(mem->data, mem->size);
+  p7 = d2i_PKCS7_bio(bio, NULL);
+  BIO_free(bio);
+  if (p7)
+  {
+    int nid=OBJ_obj2nid(p7->type);
+    switch (nid)
+    {
+      case NID_pkcs7_signed:
+        return p7->d.sign->cert;
+      case NID_pkcs7_signedAndEnveloped:
+        return p7->d.signed_and_enveloped->cert;
+      default:
+        PKCS7_free(p7);
+    }
+  }
+  return NULL;
+}
+
+static int
+_build_chain_of_trust(X509_STORE *x_store, X509 *cert_prev)
+{
+  X509 *cert = NULL;
+  MemoryStruct cert_mem = {0};
+  STACK_OF(X509) *certs;
+  int i;
+
+  STACK_OF(OPENSSL_STRING) *aia = _X509_get_aia(cert_prev);
+  char *aia_str = sk_OPENSSL_STRING_value(aia, 0);
+  BIO_printf(_bio_output, "cert_status: AIA URL: %s\n", aia_str);
+
+  if (_curl_download(aia_str, &cert_mem) != 0)
+  {
+    fprintf(stderr, "Failed to download certificate at URL %s\n", aia_str);
+    return -1;
+  }
+
+  certs = _x509_extract(&cert_mem);
+  for (i = 0; i < sk_X509_num(certs); i++)
+  {
+    cert = sk_X509_value(certs, i);
+    aia = _X509_get_aia(cert);
+    aia_str = sk_OPENSSL_STRING_value(aia, 0);
+    if (aia_str)
+    {
+      BIO_printf(_bio_output, "cert_status: AIA URL: %s\n", aia_str);
+      X509_STORE_add_cert(x_store, cert);
+      _build_chain_of_trust(x_store, cert);
+    }
+  }
+
+  free(cert_mem.data);
+  return 0;
+}
+
 int
 zcure_connect(const char *server, const char *port)
 {
   int fd;
   X509* x_cert;
+  X509_STORE *x_store;
+  X509_STORE_CTX *x_ctx;
 
   if (!server || !port) return -1;
 
@@ -101,20 +300,22 @@ zcure_connect(const char *server, const char *port)
     return -1;
   }
 
-  x_cert = _certificate_retrieve(fd);
+  x_cert = _main_certificate_retrieve(fd);
   if (!x_cert) return -1;
 
-  ASN1_INTEGER *asn1_serial = NULL;
-  asn1_serial = X509_get_serialNumber(x_cert);
-  if (asn1_serial == NULL)
-    BIO_printf(_bio_output, "Error getting serial number from certificate");
+  x_store = X509_STORE_new();
+  x_ctx = X509_STORE_CTX_new();
 
-  /* ---------------------------------------------------------- *
-   * Print the serial number value, openssl x509 -serial style  *
-   * ---------------------------------------------------------- */
-  BIO_puts(_bio_output,"serial (openssl x509 -serial style): ");
-  i2a_ASN1_INTEGER(_bio_output, asn1_serial);
-  BIO_puts(_bio_output,"\n");
+  X509_STORE_set_default_paths(x_store);
+  X509_STORE_CTX_init(x_ctx, x_store, x_cert, NULL);
+
+  _build_chain_of_trust(x_store, x_cert);
+
+  if (X509_verify_cert(x_ctx) == 0)
+  {
+    printf("%s\n", X509_verify_cert_error_string(X509_STORE_CTX_get_error(x_ctx)));
+  }
+
 
   return 0;
 }
@@ -140,5 +341,6 @@ zcure_init(void)
 int
 zcure_shutdown(void)
 {
+  EVP_cleanup();
   return 0;
 }
