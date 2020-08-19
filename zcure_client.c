@@ -252,16 +252,17 @@ _build_chain_of_trust(X509_STORE *x_store, X509 *cert_prev)
   X509 *cert = NULL;
   MemoryStruct cert_mem = {0};
   STACK_OF(X509) *certs;
-  int i;
+  int i, rv = 0;
 
   STACK_OF(OPENSSL_STRING) *aia = _X509_get_aia(cert_prev);
   char *aia_str = sk_OPENSSL_STRING_value(aia, 0);
   BIO_printf(_bio_output, "cert_status: AIA URL: %s\n", aia_str);
 
-  if (_curl_download(aia_str, &cert_mem) != 0)
+  rv = _curl_download(aia_str, &cert_mem);
+  if (rv != 0)
   {
     fprintf(stderr, "Failed to download certificate at URL %s\n", aia_str);
-    return -1;
+    goto exit;
   }
 
   certs = _x509_extract(&cert_mem);
@@ -274,12 +275,14 @@ _build_chain_of_trust(X509_STORE *x_store, X509 *cert_prev)
     {
       BIO_printf(_bio_output, "cert_status: AIA URL: %s\n", aia_str);
       X509_STORE_add_cert(x_store, cert);
-      _build_chain_of_trust(x_store, cert);
+      rv = _build_chain_of_trust(x_store, cert);
+      if (rv != 0) goto exit;
     }
   }
 
+exit:
   free(cert_mem.data);
-  return 0;
+  return rv;
 }
 
 int
@@ -296,12 +299,14 @@ zcure_connect(const char *server, const char *port)
 
   if (fd <= 0)
   {
-    fprintf(stderr, "_tcp_connect failed\n");
+    fprintf(stderr, "TCP connection failed\n");
     return -1;
   }
+  printf("TCP connection to %s:%s established\n", server, port);
 
   x_cert = _main_certificate_retrieve(fd);
   if (!x_cert) return -1;
+  printf("Certificate of %s retrieved\n", server);
 
   x_store = X509_STORE_new();
   x_ctx = X509_STORE_CTX_new();
@@ -309,12 +314,19 @@ zcure_connect(const char *server, const char *port)
   X509_STORE_set_default_paths(x_store);
   X509_STORE_CTX_init(x_ctx, x_store, x_cert, NULL);
 
-  _build_chain_of_trust(x_store, x_cert);
+  if (_build_chain_of_trust(x_store, x_cert) != 0)
+  {
+    fprintf(stderr, "Building the chain of trust for %s failed\n", server);
+    return -1;
+  }
+  printf("Chain of trust for %s built\n", server);
 
   if (X509_verify_cert(x_ctx) == 0)
   {
-    printf("%s\n", X509_verify_cert_error_string(X509_STORE_CTX_get_error(x_ctx)));
+    fprintf(stderr, "%s\n", X509_verify_cert_error_string(X509_STORE_CTX_get_error(x_ctx)));
+    return -1;
   }
+  printf("Certificate for %s verified\n", server);
 
 
   return 0;
