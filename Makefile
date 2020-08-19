@@ -10,10 +10,10 @@ LDFLAGS := -L$(BUILD) -lzcure -lssl -lcrypto -lcurl
 
 all: $(BUILD)/libzcure.so $(BUILD)/zcure $(BUILD)/zcure_server
 
-$(BUILD)/libzcure.so: $(BUILD)/zcure_client.o
+$(BUILD)/libzcure.so: $(BUILD)/zcure_client.o $(BUILD)/zcure_common.o
 	gcc -shared -o $@ $^ -lssl -lcrypto
 
-$(BUILD)/zcure_client.o: zcure_client.c
+$(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
 	gcc -c $^ $(CFLAGS) -o $@
 

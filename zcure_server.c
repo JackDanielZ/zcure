@@ -9,6 +9,19 @@
 #include <sys/epoll.h>
 #include <getopt.h>
 
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/crypto.h>
+#include <openssl/lhash.h>
+#include <openssl/objects.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/pkcs12.h>
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+
 #include "zcure_common.h"
 
 #define BUF_SIZE 500
@@ -31,6 +44,10 @@ static const char *_port = NULL;
 
 static unsigned char *_cert_data = NULL;
 static unsigned int _cert_data_size = 0;
+
+static unsigned char *_priv_data = NULL;
+static unsigned int _priv_data_size = 0;
+static EVP_PKEY *_priv_key = NULL;
 
 static unsigned char *
 _get_file_content_as_string(const char *filename, unsigned int *size)
@@ -142,6 +159,9 @@ _server_create(const char *port)
     sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (sfd == -1) continue;
 
+    if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
+      goto exit;
+
     if (0) _make_socket_non_blocking(sfd);
 
     if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0 && listen(sfd, 5) == 0)
@@ -190,20 +210,44 @@ _handle_request(Connection *conn)
 
         return send(conn->fd, _cert_data, _cert_data_size, 0);
       }
+    case STATE_WAIT_FOR_CREDENTIALS:
+      {
+        char buf[1000];
+        unsigned int i;
+        int data_size;
+
+        data_size = recv(conn->fd, buf, sizeof(buf), 0);
+        if (data_size <= 0)
+        {
+          if (data_size < 0) perror("recv");
+          return -1;
+        }
+
+        unsigned char *out = NULL;
+        size_t out_len = zcure_asym_decrypt(buf, data_size, _priv_key, &out);
+        if (out_len <= 0)
+        {
+          fprintf(stderr, "Decryption failed\n");
+          return -1;
+        }
+        for (i = 0; i < out_len; i++) printf("%c", out[i]);
+        printf("\n");
+      }
   }
 }
 
 static struct option _long_options[] =
 {
-  {"port",  required_argument, 0, 'p'},
-  {"cert",  required_argument, 0, 'c'},
+  {"port",     required_argument, 0, 'p'},
+  {"cert",     required_argument, 0, 'c'},
+  {"priv_key", required_argument, 0, 'k'},
   {0, 0, 0, 0}
 };
 
 static void
 _help(const char *prg_name)
 {
-  fprintf(stderr, "%s -p/--port port -c/--cert certificate ", prg_name);
+  fprintf(stderr, "%s -p/--port port -c/--cert certificate -k/--priv_key private_key.pem", prg_name);
 }
 
 int main(int argc, char **argv)
@@ -213,13 +257,14 @@ int main(int argc, char **argv)
   struct epoll_event event, events[MAX_EVENTS];
   Connection master_conn;
   const char *cert_file_name = NULL;
+  const char *priv_file_name = NULL;
 
   while (1)
   {
     /* getopt_long stores the option index here. */
     int option_index = 0, c;
 
-    c = getopt_long (argc, argv, "p:c:", _long_options, &option_index);
+    c = getopt_long (argc, argv, "p:c:k:", _long_options, &option_index);
 
     /* Detect the end of the options. */
     if (c == -1) break;
@@ -229,6 +274,12 @@ int main(int argc, char **argv)
       case 'c':
         {
           cert_file_name = optarg;
+          break;
+        }
+
+      case 'k':
+        {
+          priv_file_name = optarg;
           break;
         }
 
@@ -243,7 +294,7 @@ int main(int argc, char **argv)
     }
   }
 
-  if (!_port || !cert_file_name)
+  if (!_port || !cert_file_name || !priv_file_name)
   {
     _help(argv[0]);
     return EXIT_FAILURE;
@@ -253,6 +304,22 @@ int main(int argc, char **argv)
   if (!_cert_data || !_cert_data_size)
   {
     fprintf(stderr, "Failed to read certificate\n");
+    goto exit;
+  }
+
+  _priv_data = _get_file_content_as_string(priv_file_name, &_priv_data_size);
+  if (!_priv_data || !_priv_data_size)
+  {
+    fprintf(stderr, "Failed to read private key\n");
+    goto exit;
+  }
+
+  BIO *bio = BIO_new_mem_buf((void*)_priv_data, _priv_data_size);
+  PEM_read_bio_PrivateKey(bio, &_priv_key, NULL, NULL);
+  BIO_free(bio);
+  if (!_priv_key)
+  {
+    fprintf(stderr, "Failed to extract private key\n");
     goto exit;
   }
 

@@ -289,9 +289,11 @@ int
 zcure_connect(const char *server, const char *port)
 {
   int fd;
+  unsigned int i;
   X509* x_cert;
   X509_STORE *x_store;
   X509_STORE_CTX *x_ctx;
+  EVP_PKEY *pkey = NULL;
 
   if (!server || !port) return -1;
 
@@ -328,7 +330,23 @@ zcure_connect(const char *server, const char *port)
   }
   printf("Certificate for %s verified\n", server);
 
+  pkey = X509_get_pubkey(x_cert);
+  if (!pkey)
+  {
+    fprintf(stderr, "Certificate public key extraction for %s failed\n", server);
+    return -1;
+  }
 
+  unsigned char *out = NULL;
+  size_t outlen = zcure_asym_encrypt("abcdefghijklmnopqrstuvwxyz", 26, pkey, &out);
+  if (outlen <= 0)
+  {
+    fprintf(stderr, "Encryption failed\n");
+    return -1;
+  }
+
+  for (i = 0; i < outlen; i++) printf("%.2X ", out[i]);
+  send(fd, out, outlen, 0);
   return 0;
 }
 
