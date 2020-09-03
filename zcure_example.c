@@ -15,7 +15,7 @@ int main(int argc, char **argv)
 
   zcure_init();
 
-  fd = zcure_connect(argv[1], argv[2]);
+  fd = zcure_connect(argv[1], argv[2], "Zen");
   if (fd == -1)
   {
     fprintf(stderr, "Cannot establish a secure connection to %s:%s\n", argv[1], argv[2]);

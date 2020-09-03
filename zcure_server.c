@@ -30,14 +30,17 @@
 typedef enum
 {
   STATE_INIT,
-  STATE_WAIT_FOR_CREDENTIALS,
-  STATE_WAIT_FOR_CHALLENGE_RESPONSE,
+  STATE_WAIT_FOR_CLIENT_CHALLENGE,
+  STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE,
 } Connection_State;
 
 typedef struct
 {
   int fd;
   Connection_State state;
+  unsigned char aes_cbc_key[32];
+  unsigned char aes_cbc_iv[AES_BLOCK_SIZE];
+  unsigned char challenge[32];
 } Connection;
 
 static const char *_port = NULL;
@@ -48,61 +51,6 @@ static unsigned int _cert_data_size = 0;
 static unsigned char *_priv_data = NULL;
 static unsigned int _priv_data_size = 0;
 static EVP_PKEY *_priv_key = NULL;
-
-static unsigned char *
-_get_file_content_as_string(const char *filename, unsigned int *size)
-{
-  unsigned char *file_data = NULL;
-  long fsize = 0;
-  FILE *fp;
-
-  if (filename == NULL || size == NULL)
-  {
-    fprintf(stderr, "Invalid parameters\n");
-    return NULL;
-  }
-
-  fp = fopen(filename, "r");
-  *size = 0;
-
-  if (fp == NULL)
-  {
-    fprintf(stderr, "Can not open file: \"%s\".\n", filename);
-    return NULL;
-  }
-
-  fseek(fp, 0, SEEK_END);
-  fsize = ftell(fp);
-
-  if (fsize < 0)
-  {
-    fprintf(stderr, "Can not ftell file: \"%s\".\n", filename);
-    goto exit;
-  }
-
-  rewind(fp);
-  if (fsize > 0)
-  {
-    file_data = (unsigned char *) calloc(1, fsize + 1);
-    if (!file_data)
-    {
-      fprintf(stderr, "calloc failed\n");
-      goto exit;
-    }
-    if (!fread(file_data, 1, fsize, fp)) {
-      free(file_data);
-      file_data = NULL;
-      if (!feof(fp)) fprintf(stderr, "fread failed\n");
-    }
-    else {
-      *size = fsize;
-    }
-  }
-
-exit:
-  fclose(fp);
-  return file_data;
-}
 
 static int
 _make_socket_non_blocking(int sfd)
@@ -192,48 +140,129 @@ _handle_request(Connection *conn)
   switch (conn->state)
   {
     case STATE_INIT:
+    {
+      char c;
+      if (recv(conn->fd, &c, 1, 0) != 1)
       {
-        char c;
-        if (recv(conn->fd, &c, 1, 0) != 1)
-        {
-          perror("recv");
-          return -1;
-        }
-
-        if (c != CERT_GET_OP)
-        {
-          fprintf(stderr, "Invalid first init byte\n");
-          return -1;
-        }
-
-        conn->state = STATE_WAIT_FOR_CREDENTIALS;
-
-        return send(conn->fd, _cert_data, _cert_data_size, 0);
+        perror("recv");
+        return -1;
       }
-    case STATE_WAIT_FOR_CREDENTIALS:
+
+      if (c != CERT_GET_OP)
       {
-        char buf[1000];
-        unsigned int i;
-        int data_size;
-
-        data_size = recv(conn->fd, buf, sizeof(buf), 0);
-        if (data_size <= 0)
-        {
-          if (data_size < 0) perror("recv");
-          return -1;
-        }
-
-        unsigned char *out = NULL;
-        size_t out_len = zcure_asym_decrypt(buf, data_size, _priv_key, &out);
-        if (out_len <= 0)
-        {
-          fprintf(stderr, "Decryption failed\n");
-          return -1;
-        }
-        for (i = 0; i < out_len; i++) printf("%c", out[i]);
-        printf("\n");
+        fprintf(stderr, "Invalid first init byte\n");
+        return -1;
       }
+
+      conn->state = STATE_WAIT_FOR_CLIENT_CHALLENGE;
+
+      return send(conn->fd, _cert_data, _cert_data_size, 0);
+    }
+    case STATE_WAIT_FOR_CLIENT_CHALLENGE:
+    {
+      unsigned char buf[1000];
+      int data_size;
+      void *out;
+      unsigned int out_len;
+      ClientChallengeRequest *ccr;
+      ServerChallengeResponse scr;
+
+      /* Receive the encrypted CCReq */
+      data_size = recv(conn->fd, buf, sizeof(buf), 0);
+      if (data_size <= 0)
+      {
+        if (data_size < 0) perror("recv");
+        return -1;
+      }
+
+      /* Decrypt CCReq */
+      out_len = zcure_asym_decrypt(buf, data_size, _priv_key, &out);
+      if (out_len <= 0)
+      {
+        fprintf(stderr, "Decryption failed\n");
+        return -1;
+      }
+
+      /* Extraction and verification of the username */
+      ccr = (ClientChallengeRequest *)out;
+      ccr->username[sizeof(ccr->username) - 1] = '\0';
+      EVP_PKEY *user_pkey = retrieve_key_by_username(ccr->username, 0);
+      if (!user_pkey)
+      {
+        fprintf(stderr, "No public key found for user %s\n", ccr->username);
+        return -1;
+      }
+
+      /* Prepare SCRsp */
+      zcure_data_randomize(sizeof(scr), &scr);
+      memcpy(scr.challenge_response, ccr->challenge_request, sizeof(scr.challenge_response));
+
+      /* Store AES info and challenge */
+      memcpy(conn->aes_cbc_key, scr.aes_cbc_key, sizeof(scr.aes_cbc_key));
+      memcpy(conn->aes_cbc_iv, scr.aes_cbc_iv, sizeof(scr.aes_cbc_iv));
+      memcpy(conn->challenge, scr.challenge_request, sizeof(scr.challenge_request));
+
+      /* Encrypt SCRsp */
+      out_len = zcure_asym_encrypt(&scr, sizeof(scr), user_pkey, &out);
+
+      conn->state = STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE;
+
+      /* Send the encrypted SCRsp */
+      return send(conn->fd, out, out_len, 0);
+    }
+    case STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE:
+    {
+      unsigned char buf[1000];
+      int data_size;
+      void *out;
+      int out_len;
+      ClientChallengeResponse *ccr;
+
+      /* Receive the encrypted CCRsp */
+      data_size = recv(conn->fd, buf, sizeof(buf), 0);
+      if (data_size <= 0)
+      {
+        if (data_size < 0) perror("recv");
+        return -1;
+      }
+
+      /* Decrypt CCRsp */
+      out_len = zcure_sym_decrypt(buf, data_size, conn->aes_cbc_key, conn->aes_cbc_iv, &out);
+      if (out_len <= 0)
+      {
+        fprintf(stderr, "Decryption failed\n");
+        return -1;
+      }
+
+      if (out_len != sizeof(ClientChallengeResponse))
+      {
+        fprintf(stderr, "Expecting ClientChallengeResponse of %lu bytes - received %d bytes\n",
+            sizeof(ClientChallengeResponse), out_len);
+        return -1;
+      }
+
+      /* Check challenge response */
+      ccr = (ClientChallengeResponse *)out;
+      if (memcmp(ccr->challenge_response, conn->challenge, sizeof(conn->challenge)) != 0)
+      {
+        fprintf(stderr, "Wrong challenge\n");
+        return -1;
+      }
+
+      /* Prepare response */
+      unsigned int rsp_rc = 0;
+
+      /* Encrypt response */
+      out_len = zcure_sym_encrypt(&rsp_rc, sizeof(rsp_rc), conn->aes_cbc_key, conn->aes_cbc_iv, &out);
+
+      conn->state = STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE;
+
+      /* Send the encrypted SCRsp */
+      return send(conn->fd, out, out_len, 0);
+    }
   }
+
+  return -1;
 }
 
 static struct option _long_options[] =
@@ -300,14 +329,14 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  _cert_data = _get_file_content_as_string(cert_file_name, &_cert_data_size);
+  _cert_data = get_file_content_as_string(cert_file_name, &_cert_data_size);
   if (!_cert_data || !_cert_data_size)
   {
     fprintf(stderr, "Failed to read certificate\n");
     goto exit;
   }
 
-  _priv_data = _get_file_content_as_string(priv_file_name, &_priv_data_size);
+  _priv_data = get_file_content_as_string(priv_file_name, &_priv_data_size);
   if (!_priv_data || !_priv_data_size)
   {
     fprintf(stderr, "Failed to read private key\n");

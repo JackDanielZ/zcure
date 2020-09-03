@@ -286,14 +286,17 @@ exit:
 }
 
 int
-zcure_connect(const char *server, const char *port)
+zcure_connect(const char *server, const char *port, const char *username)
 {
   int fd;
-  unsigned int i;
   X509* x_cert;
   X509_STORE *x_store;
   X509_STORE_CTX *x_ctx;
   EVP_PKEY *pkey = NULL;
+  ClientChallengeRequest ccr;
+  unsigned char recv_buffer[1024];
+  void *out;
+  int size;
 
   if (!server || !port) return -1;
 
@@ -337,16 +340,88 @@ zcure_connect(const char *server, const char *port)
     return -1;
   }
 
-  unsigned char *out = NULL;
-  size_t outlen = zcure_asym_encrypt("abcdefghijklmnopqrstuvwxyz", 26, pkey, &out);
-  if (outlen <= 0)
+  zcure_data_randomize(sizeof(ccr), &ccr);
+  strncpy(ccr.username, username, sizeof(ccr.username) - 1);
+
+  size = zcure_asym_encrypt(&ccr, sizeof(ccr), pkey, &out);
+  if (size <= 0)
   {
     fprintf(stderr, "Encryption failed\n");
     return -1;
   }
 
-  for (i = 0; i < outlen; i++) printf("%.2X ", out[i]);
-  send(fd, out, outlen, 0);
+  if (send(fd, out, size, 0) != size)
+  {
+    fprintf(stderr, "Sending ClientChallengeRequest failed\n");
+    return -1;
+  }
+
+  size = recv(fd, recv_buffer, sizeof(recv_buffer), 0);
+  if (size <= 0)
+  {
+    fprintf(stderr, "Error in reception of ServerChallengeResponse\n");
+    return -1;
+  }
+
+  EVP_PKEY *user_pkey = retrieve_key_by_username(username, 1);
+  if (!user_pkey)
+  {
+    fprintf(stderr, "No public key found for user %s\n", username);
+    return -1;
+  }
+
+  ServerChallengeResponse *scr;
+  size = zcure_asym_decrypt(recv_buffer, size, user_pkey, (void **)&scr);
+  if (size != sizeof(ServerChallengeResponse))
+  {
+    fprintf(stderr, "Expecting ServerChallengeResponse of %lu bytes - received %d bytes\n",
+        sizeof(ServerChallengeResponse), size);
+    return -1;
+  }
+
+  if (memcmp(scr->challenge_response, ccr.challenge_request, sizeof(scr->challenge_response)) != 0)
+  {
+    fprintf(stderr, "Wrong challenge\n");
+    return -1;
+  }
+
+  ClientChallengeResponse ccrsp;
+  memcpy(ccrsp.challenge_response, scr->challenge_request, sizeof(ccrsp.challenge_response));
+
+  size = zcure_sym_encrypt(&ccrsp, sizeof(ccrsp), scr->aes_cbc_key, scr->aes_cbc_iv, &out);
+  if (size <= 0)
+  {
+    fprintf(stderr, "Encryption failed\n");
+    return -1;
+  }
+
+  if (send(fd, out, size, 0) != size)
+  {
+    fprintf(stderr, "Sending ClientChallengeResponse failed\n");
+    return -1;
+  }
+
+  size = recv(fd, recv_buffer, sizeof(recv_buffer), 0);
+  if (size <= 0)
+  {
+    fprintf(stderr, "Error in reception of final acknowledge\n");
+    return -1;
+  }
+
+  /* Decrypt acknowledge */
+  unsigned int *rsp_rc;
+  size = zcure_sym_decrypt(recv_buffer, size, scr->aes_cbc_key, scr->aes_cbc_iv, (void **)&rsp_rc);
+  if (size <= 0)
+  {
+    fprintf(stderr, "Decryption failed\n");
+    return -1;
+  }
+
+  if (*rsp_rc != 0)
+  {
+    fprintf(stderr, "Acknowledge failed\n");
+    return -1;
+  }
   return 0;
 }
 

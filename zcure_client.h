@@ -4,7 +4,7 @@
 int zcure_init(void);
 int zcure_shutdown(void);
 
-int zcure_connect(const char *server, const char *port);
+int zcure_connect(const char *server, const char *port, const char *username);
 
 int zcure_disconnect(int fd);
 
