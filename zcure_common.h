@@ -6,12 +6,13 @@
 #define CERT_GET_OP 0
 
 /*
- * Username and challenge sent by the client to the server
+ * Username, service and challenge sent by the client to the server
  * Encrypted with the server certificate public key
  */
 typedef struct
 {
   char username[32]; /* Must be terminated with '\0' */
+  char service[32]; /* Must be terminated with '\0' */
   uint8_t challenge_request[32];
 } ClientChallengeRequest;
 

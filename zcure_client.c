@@ -28,9 +28,51 @@ typedef struct
   unsigned int size;
 } MemoryStruct;
 
+struct Connection
+{
+  int cid;
+  int fd;
+  uint8_t aes_cbc_key[32];
+  uint8_t aes_cbc_iv[AES_BLOCK_SIZE];
+
+  struct Connection *next;
+} Connection;
+
 static BIO *_bio_output = NULL;
 static unsigned char _server_cert[100*1024] = {0};
 static int _server_cert_length = 0;
+
+static struct Connection *_connections = NULL;
+
+static struct Connection *
+_connection_find_by_cid(int cid)
+{
+  struct Connection *c = _connections;
+  while (c)
+  {
+    if (c->cid == cid) return c;
+    c = c->next;
+  }
+  return NULL;
+}
+
+static int
+_connection_remove(struct Connection *conn)
+{
+  struct Connection *c = _connections, *prev_c = NULL;
+  while (c)
+  {
+    if (c == conn)
+    {
+      if (prev_c) prev_c->next = c->next;
+      else _connections = c->next;
+      return 0;
+    }
+    prev_c = c;
+    c = c->next;
+  }
+  return -1;
+}
 
 static int
 _tcp_connect(const char *host, const char *port)
@@ -286,7 +328,7 @@ exit:
 }
 
 int
-zcure_connect(const char *server, const char *port, const char *username)
+zcure_client_connect(const char *server, const char *port, const char *username, const char *service)
 {
   int fd;
   X509* x_cert;
@@ -342,6 +384,7 @@ zcure_connect(const char *server, const char *port, const char *username)
 
   zcure_data_randomize(sizeof(ccr), &ccr);
   strncpy(ccr.username, username, sizeof(ccr.username) - 1);
+  strncpy(ccr.service, service, sizeof(ccr.service) - 1);
 
   size = zcure_asym_encrypt(&ccr, sizeof(ccr), pkey, &out);
   if (size <= 0)
@@ -422,29 +465,94 @@ zcure_connect(const char *server, const char *port, const char *username)
     fprintf(stderr, "Acknowledge failed\n");
     return -1;
   }
-  return 0;
+
+  struct Connection *c = calloc(1, sizeof(*c));
+  c->fd = fd;
+  memcpy(c->aes_cbc_key, scr->aes_cbc_key, sizeof(c->aes_cbc_key));
+  memcpy(c->aes_cbc_iv, scr->aes_cbc_iv, sizeof(c->aes_cbc_iv));
+
+  c->cid = fd;
+  c->next = _connections;
+  _connections = c;
+
+  return c->cid;
 }
 
 int
-zcure_disconnect(int fd)
+zcure_client_disconnect(int cid)
 {
-  close(fd);
+  struct Connection *c = _connection_find_by_cid(cid);
+  if (!c) return -1;
+
+  _connection_remove(c);
+
+  free(c);
   return 0;
 }
 
+int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size)
+{
+  void *cipher_buffer = NULL;
+  unsigned int nb_enc_bytes, nb_sent_bytes;
+  struct Connection *c = _connection_find_by_cid(cid);
+
+  if (!c) return -1;
+
+  nb_enc_bytes = zcure_sym_encrypt(plain_buffer, plain_size, c->aes_cbc_key, c->aes_cbc_iv, &cipher_buffer);
+  if (nb_enc_bytes <= 0)
+  {
+    fprintf(stderr, "Cannot encrypt data with symmetric key\n");
+    return -1;
+  }
+  else
+  {
+    nb_sent_bytes = send(cid, cipher_buffer, nb_enc_bytes, 0);
+    if (nb_sent_bytes != nb_enc_bytes)
+    {
+      fprintf(stderr, "Cannot send all the data through the secure channel\n");
+      return -1;
+    }
+  }
+  return plain_size;
+}
+
+int zcure_client_receive(int cid, void **plain_buffer)
+{
+  unsigned char recv_buffer[10000];
+  unsigned nb_recv_bytes, nb_dec_bytes;
+  struct Connection *c = _connection_find_by_cid(cid);
+
+  if (!c) return -1;
+
+  nb_recv_bytes = recv(cid, recv_buffer, sizeof(recv_buffer), 0);
+  if (nb_recv_bytes <= 0)
+  {
+    fprintf(stderr, "Failed to receive data\n");
+    return -1;
+  }
+  nb_dec_bytes = zcure_sym_decrypt(recv_buffer, nb_recv_bytes, c->aes_cbc_key, c->aes_cbc_iv, plain_buffer);
+  if (nb_dec_bytes <= 0)
+  {
+    fprintf(stderr, "Cannot decrypt data with symmetric key\n");
+    return -1;
+  }
+  return nb_dec_bytes;
+}
+
 int
-zcure_init(void)
+zcure_client_init(void)
 {
   OpenSSL_add_all_algorithms();
   ERR_load_BIO_strings();
   ERR_load_crypto_strings();
 
   _bio_output = BIO_new_fp(stdout, BIO_NOCLOSE);
+
   return 0;
 }
 
 int
-zcure_shutdown(void)
+zcure_client_shutdown(void)
 {
   EVP_cleanup();
   return 0;

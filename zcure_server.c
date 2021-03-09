@@ -32,6 +32,7 @@ typedef enum
   STATE_INIT,
   STATE_WAIT_FOR_CLIENT_CHALLENGE,
   STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE,
+  STATE_OPERATIONAL
 } Connection_State;
 
 typedef struct
@@ -43,6 +44,21 @@ typedef struct
   unsigned char challenge[32];
 } Connection;
 
+typedef int (*service_cb)(void *data, unsigned int data_len, void *user_data);
+
+struct _Service
+{
+  const char *name;
+  unsigned int id;
+
+  service_cb cb;
+  void *user_data;
+
+  struct _Service *next;
+} _Service;
+
+typedef struct _Service Service;
+
 static const char *_port = NULL;
 
 static unsigned char *_cert_data = NULL;
@@ -51,6 +67,32 @@ static unsigned int _cert_data_size = 0;
 static unsigned char *_priv_data = NULL;
 static unsigned int _priv_data_size = 0;
 static EVP_PKEY *_priv_key = NULL;
+
+static Service *_services = NULL;
+
+static Service *
+_service_find_by_id(unsigned int id)
+{
+  Service *s = _services;
+  while (s)
+  {
+    if (s->id == id) return s;
+    s = s->next;
+  }
+  return NULL;
+}
+
+static Service *
+_service_find_by_name(const char *name)
+{
+  Service *s = _services;
+  while (s)
+  {
+    if (!strcmp(s->name, name)) return s;
+    s = s->next;
+  }
+  return NULL;
+}
 
 static int
 _make_socket_non_blocking(int sfd)
@@ -128,7 +170,31 @@ exit:
 }
 
 static int
-_handle_request(Connection *conn)
+_dispatch_request(Connection *conn, void *data, unsigned int data_len)
+{
+  unsigned int service_id = *(unsigned int *)data;
+  Service *svc = _service_find_by_id(service_id);
+
+  data = (char *)data + sizeof(service_id);
+  data_len -= sizeof(service_id);
+
+  if (!svc)
+  {
+    fprintf(stderr, "Service %d unknown\n", service_id);
+    return -1;
+  }
+
+  if (!svc->cb)
+  {
+    fprintf(stderr, "No callback for service %d\n", service_id);
+    return -1;
+  }
+
+  return svc->cb(data, data_len, svc->user_data);
+}
+
+static int
+_handle_connection(Connection *conn)
 {
   /*
   char read_buffer[100];
@@ -255,10 +321,39 @@ _handle_request(Connection *conn)
       /* Encrypt response */
       out_len = zcure_sym_encrypt(&rsp_rc, sizeof(rsp_rc), conn->aes_cbc_key, conn->aes_cbc_iv, &out);
 
-      conn->state = STATE_WAIT_FOR_CLIENT_CHALLENGE_RESPONSE;
+      conn->state = STATE_OPERATIONAL;
 
       /* Send the encrypted SCRsp */
       return send(conn->fd, out, out_len, 0);
+    }
+    case STATE_OPERATIONAL:
+    {
+      unsigned char buf[10000];
+      int data_size;
+      void *out;
+      int out_len;
+
+      /* Receive the encrypted CCRsp */
+      data_size = recv(conn->fd, buf, sizeof(buf), 0);
+      if (data_size <= 0)
+      {
+        if (data_size < 0) perror("recv");
+        return -1;
+      }
+
+      /* Decrypt CCRsp */
+      out_len = zcure_sym_decrypt(buf, data_size, conn->aes_cbc_key, conn->aes_cbc_iv, &out);
+      if (out_len <= 0)
+      {
+        fprintf(stderr, "Decryption failed\n");
+        return -1;
+      }
+
+      _dispatch_request(conn, out, out_len);
+
+      printf("Received buffer of size %d\n", out_len);
+      /* FIXME Here we should extract the service, convert to a fd and send the data there */
+      return out_len;
     }
   }
 
@@ -405,9 +500,10 @@ int main(int argc, char **argv)
         }
       }
       else {
-        if (_handle_request(conn) <= 0)
+        if (_handle_connection(conn) <= 0)
         {
           /* Closing connection */
+          close(conn->fd);
           epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
           free(conn);
         }
