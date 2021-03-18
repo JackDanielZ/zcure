@@ -11,8 +11,7 @@
 #include <openssl/objects.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
-#include <openssl/x509.h>
-#include <openssl/pkcs12.h>
+#include <openssl/kdf.h>
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 
@@ -73,31 +72,68 @@ exit:
   return file_data;
 }
 
-EVP_PKEY *
-retrieve_key_by_username(const char *username, int is_private)
+unsigned char *
+zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, unsigned int salt_len, unsigned int secret_len)
 {
   char path[256];
-  unsigned char *key_data;
-  unsigned int key_data_size = 0;
   EVP_PKEY *key = NULL;
+  EC_KEY *priv_key;
+  const EC_POINT *pub_key;
+  BIO *bio;
+  unsigned char *key_file_data;
+  unsigned char *shared_secret;
+  unsigned char *secret;
 
-  sprintf(path, "~/.config/zcure/server/user_keys/%s%s.pem", username, is_private ? "_priv" : "");
-  sprintf(path, "/home/daniel/%s%s.pem", username, is_private ? "_priv" : "");
-  key_data = get_file_content_as_string(path, &key_data_size);
-  if (!key_data || !key_data_size)
+  unsigned int key_file_data_size = 0;
+  unsigned int shared_secret_len;
+
+  key_file_data = get_file_content_as_string("/home/daniel/.config/zcure/local_key/mine.pem", &key_file_data_size);
+  if (!key_file_data || !key_file_data_size)
+  {
+    fprintf(stderr, "Failed to read private key\n");
+    return NULL;
+  }
+
+  bio = BIO_new_mem_buf((void*)key_file_data, key_file_data_size);
+  PEM_read_bio_PrivateKey(bio, &key, NULL, NULL);
+  BIO_free(bio);
+  free(key_file_data);
+
+  priv_key = EVP_PKEY_get1_EC_KEY(key);
+
+  sprintf(path, "/home/daniel/.config/zcure/remote_keys/%s.pub", username);
+  key_file_data = get_file_content_as_string(path, &key_file_data_size);
+  if (!key_file_data || !key_file_data_size)
   {
     fprintf(stderr, "Failed to read key for user %s\n", username);
     return NULL;
   }
 
-  BIO *bio = BIO_new_mem_buf((void*)key_data, key_data_size);
-  if (is_private)
-    PEM_read_bio_PrivateKey(bio, &key, NULL, NULL);
-  else
-    PEM_read_bio_PUBKEY(bio, &key, NULL, NULL);
+  bio = BIO_new_mem_buf((void*)key_file_data, key_file_data_size);
+  PEM_read_bio_PUBKEY(bio, &key, NULL, NULL);
   BIO_free(bio);
+  free(key_file_data);
 
-  return key;
+  pub_key = EC_KEY_get0_public_key(EVP_PKEY_get0_EC_KEY(key));
+
+  shared_secret_len = EC_GROUP_get_degree(EC_KEY_get0_group(priv_key));
+  shared_secret_len = (shared_secret_len + 7) / 8;
+
+  shared_secret = alloca(shared_secret_len + salt_len);
+  if (!shared_secret)
+  {
+    fprintf(stderr, "Failed to allocate memory for shared_secret.\n");
+    return NULL;
+  }
+
+  shared_secret_len = ECDH_compute_key(shared_secret, shared_secret_len, pub_key, priv_key, NULL);
+
+  memcpy(shared_secret + shared_secret_len, salt, salt_len);
+
+  secret = malloc(secret_len);
+  SHA256(shared_secret, shared_secret_len + salt_len, secret);
+
+  return secret;
 }
 
 void
@@ -112,145 +148,120 @@ zcure_data_randomize(unsigned int nb, void *out_buf)
 }
 
 int
-zcure_asym_encrypt(const void *in_buf, unsigned int in_len, EVP_PKEY *pkey, void **out_buf)
-{
-  int rv;
-  size_t out_len;
-  EVP_PKEY_CTX *pk_ctx;
-
-  *out_buf = NULL;
-
-  pk_ctx = EVP_PKEY_CTX_new(pkey, NULL);
-  if (!pk_ctx)
-  {
-    fprintf(stderr, "EVP_PKEY_CTX_new failed\n");
-    return -1;
-  }
-  if (EVP_PKEY_encrypt_init(pk_ctx) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_encrypt_init failed\n");
-    return -1;
-  }
-  if ((rv = EVP_PKEY_encrypt(pk_ctx, NULL, &out_len, in_buf, in_len)) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_encrypt failed: %d\n", rv);
-    return -1;
-  }
-
-  *out_buf = malloc(out_len);
-  memset(*out_buf, 0, out_len);
-  if ((rv = EVP_PKEY_encrypt(pk_ctx, *out_buf, &out_len, in_buf, in_len)) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_encrypt failed: %d\n", rv);
-    return -1;
-  }
-
-  return out_len;
-}
-
-int
-zcure_asym_decrypt(const void *in_buf, unsigned int in_len, EVP_PKEY *pkey, void **out_buf)
-{
-  int rv;
-  size_t out_len;
-  EVP_PKEY_CTX *pk_ctx;
-
-  pk_ctx = EVP_PKEY_CTX_new(pkey, NULL);
-  if (!pk_ctx)
-  {
-    fprintf(stderr, "EVP_PKEY_CTX_new failed\n");
-    return -1;
-  }
-  if (EVP_PKEY_decrypt_init(pk_ctx) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_decrypt_init failed\n");
-    return -1;
-  }
-  if ((rv = EVP_PKEY_decrypt(pk_ctx, NULL, &out_len, in_buf, in_len)) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_decrypt failed: %d\n", rv);
-    return -1;
-  }
-
-  *out_buf = malloc(out_len);
-  memset(*out_buf, 0, out_len);
-  if ((rv = EVP_PKEY_decrypt(pk_ctx, *out_buf, &out_len, in_buf, in_len)) <= 0)
-  {
-    fprintf(stderr, "EVP_PKEY_decrypt failed: %d\n", rv);
-    return -1;
-  }
-
-  return out_len;
-}
-
-int
-zcure_sym_encrypt(const void *in_buf,
-                  unsigned int in_len,
-                  const unsigned char *key,
+zcure_gcm_encrypt(const unsigned char *key,
                   const unsigned char *iv,
-                  void **out_buf)
+                  unsigned int iv_len,
+                  const void *aad_buf,
+                  unsigned int aad_len,
+                  const void *in_buf,
+                  unsigned int in_len,
+                  void *out_buf,
+                  void *tag_buf,
+                  unsigned int tag_len)
 {
-  int update_out_len, final_out_len;
   EVP_CIPHER_CTX *ctx;
+  int outlen, rv;
 
   ctx = EVP_CIPHER_CTX_new();
-  if (!ctx)
-  {
-    fprintf(stderr, "EVP_CIPHER_CTX_new failed\n");
-    return -1;
-  }
-  EVP_EncryptInit(ctx, EVP_aes_256_cbc(), key, iv);
+  /* Set cipher type and mode */
+  EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, iv);
 
-  *out_buf = malloc(in_len + AES_BLOCK_SIZE - 1);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv_len, NULL);
 
-  if (EVP_EncryptUpdate(ctx, *out_buf, &update_out_len, in_buf, in_len) <= 0)
+  /* Initialise key and IV */
+
+  if (aad_buf)
   {
-    fprintf(stderr, "EVP_EncryptUpdate failed\n");
-    EVP_CIPHER_CTX_free(ctx);
-    return -1;
-  }
-  if (EVP_EncryptFinal(ctx, *out_buf + update_out_len, &final_out_len) <= 0)
-  {
-    fprintf(stderr, "EVP_EncryptFinal failed\n");
-    EVP_CIPHER_CTX_free(ctx);
-    return -1;
+    rv = EVP_EncryptUpdate(ctx, NULL, &outlen, aad_buf, aad_len);
+    if (rv == 0)
+    {
+      fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptUpdate AAD failed\n");
+      return -1;
+    }
   }
 
-  return update_out_len + final_out_len;
+  if (in_buf)
+  {
+    /* Encrypt plaintext */
+    rv = EVP_EncryptUpdate(ctx, out_buf, &outlen, in_buf, in_len);
+    if (rv == 0)
+    {
+      fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptUpdate input failed\n");
+      return -1;
+    }
+  }
+
+  /* Finalise: note get no output for GCM */
+  rv = EVP_EncryptFinal_ex(ctx, out_buf, &outlen);
+  if (rv == 0)
+  {
+    fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptFinal_ex failed\n");
+    return -1;
+  }
+
+  /* Get tag */
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, tag_len, tag_buf);
+
+  EVP_CIPHER_CTX_free(ctx);
+
+  return 0;
 }
 
 int
-zcure_sym_decrypt(const void *in_buf,
-                  unsigned int in_len,
-                  const unsigned char *key,
+zcure_gcm_decrypt(const unsigned char *key,
                   const unsigned char *iv,
-                  void **out_buf)
+                  unsigned int iv_len,
+                  const void *aad_buf,
+                  unsigned int aad_len,
+                  const void *in_buf,
+                  unsigned int in_len,
+                  void *out_buf,
+                  const void *tag_buf,
+                  unsigned int tag_len)
 {
-  int update_out_len, final_out_len;
   EVP_CIPHER_CTX *ctx;
+  int outlen, rv;
 
   ctx = EVP_CIPHER_CTX_new();
-  if (!ctx)
-  {
-    fprintf(stderr, "EVP_CIPHER_CTX_new failed\n");
-    return -1;
-  }
-  EVP_DecryptInit(ctx, EVP_aes_256_cbc(), key, iv);
+  /* Set cipher type and mode */
+  EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, iv);
 
-  *out_buf = malloc(in_len + AES_BLOCK_SIZE - 1);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv_len, NULL);
 
-  if (EVP_DecryptUpdate(ctx, *out_buf, &update_out_len, in_buf, in_len) <= 0)
+  /* Initialise key and IV */
+
+  if (aad_buf)
   {
-    fprintf(stderr, "EVP_DecryptUpdate failed\n");
-    EVP_CIPHER_CTX_free(ctx);
-    return -1;
-  }
-  if (EVP_DecryptFinal(ctx, *out_buf + update_out_len, &final_out_len) <= 0)
-  {
-    fprintf(stderr, "EVP_DecryptFinal failed\n");
-    EVP_CIPHER_CTX_free(ctx);
-    return -1;
+    rv = EVP_DecryptUpdate(ctx, NULL, &outlen, aad_buf, aad_len);
+    if (rv == 0)
+    {
+      fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptUpdate AAD failed\n");
+      return -1;
+    }
   }
 
-  return update_out_len + final_out_len;
+  if (in_buf)
+  {
+    /* Decrypt input */
+    rv = EVP_DecryptUpdate(ctx, out_buf, &outlen, in_buf, in_len);
+    if (rv == 0)
+    {
+      fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptUpdate input failed\n");
+      return -1;
+    }
+  }
+
+  /* Set tag */
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len, (void*)tag_buf);
+
+  rv = EVP_DecryptFinal_ex(ctx, out_buf, &outlen);
+  if (rv == 0)
+  {
+    fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptFinal_ex failed\n");
+    return -1;
+  }
+
+  EVP_CIPHER_CTX_free(ctx);
+
+  return 0;
 }

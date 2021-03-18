@@ -4,10 +4,10 @@
 #include <time.h>
 
 #include "zcure_client.h"
+#include "zcure_common.h"
 
 int main(int argc, char **argv)
 {
-  unsigned int i;
   int cid;
   unsigned char buffer[256];
   void *recv_buffer;
@@ -27,11 +27,7 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  srand(time(NULL));
-  for (i = 0; i < sizeof(buffer); i++)
-  {
-    buffer[i] = rand()%256;
-  }
+  zcure_data_randomize(sizeof(buffer), buffer);
 
   if (zcure_client_send(cid, buffer, sizeof(buffer)) != sizeof(buffer))
   {
