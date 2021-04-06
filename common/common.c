@@ -15,7 +15,7 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 
-#include "zcure_common.h"
+#include "common/common.h"
 
 unsigned char *
 get_file_content_as_string(const char *filename, unsigned int *size)

@@ -3,8 +3,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "zcure_client.h"
-#include "zcure_common.h"
+#include "lib/client/client.h"
+#include "common/common.h"
 
 int main(int argc, char **argv)
 {

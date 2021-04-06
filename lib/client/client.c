@@ -15,8 +15,8 @@
 #include <openssl/lhash.h>
 #include <openssl/objects.h>
 
-#include "zcure_client.h"
-#include "zcure_common.h"
+#include "lib/client/client.h"
+#include "common/common.h"
 
 typedef struct
 {

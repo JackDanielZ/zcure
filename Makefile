@@ -6,22 +6,23 @@ default: all
 
 CFLAGS := -Wall -Wextra -g3 -fvisibility=default -fPIC -I.
 
-LDFLAGS := -L$(BUILD) -lzcure -lssl -lcrypto -lcurl
+LDFLAGS := -L$(BUILD) -lssl -lcrypto -lcurl
 
-all: $(BUILD)/libzcure.so $(BUILD)/zcure $(BUILD)/zcure_server
-
-$(BUILD)/libzcure.so: $(BUILD)/zcure_client.o $(BUILD)/zcure_common.o
-	gcc -shared -o $@ $^ -lssl -lcrypto
+all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_server
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
 	gcc -c $^ $(CFLAGS) -o $@
 
-$(BUILD)/zcure: zcure_example.c $(BUILD)/libzcure.so
+$(BUILD)/libzcure_client.so: $(BUILD)/lib/client/client.o $(BUILD)/common/common.o
+	gcc -shared -o $@ $^ -lssl -lcrypto
+
+$(BUILD)/zcure_client_example: LDFLAGS += -lzcure_client
+$(BUILD)/zcure_client_example: $(BUILD)/bin/client_example/main.o $(BUILD)/libzcure_client.so
 	gcc $^ -o $@ $(CFLAGS) $(LDFLAGS)
 
-$(BUILD)/zcure_server: zcure_server.c $(BUILD)/libzcure.so
+$(BUILD)/zcure_server: $(BUILD)/bin/server/main.o $(BUILD)/common/common.o
 	gcc $^ -o $@ $(CFLAGS) $(LDFLAGS)
 
 clean:
-	rm -rf $(BUILD)/*.o $(BUILD)/*.so $(BUILD)/zcure
+	rm -rf $(BUILD)/*

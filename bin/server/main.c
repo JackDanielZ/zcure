@@ -19,7 +19,7 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 
-#include "zcure_common.h"
+#include "common/common.h"
 
 #define BUF_SIZE 500
 #define MAX_EVENTS 5
@@ -86,18 +86,6 @@ _client_find_by_id(unsigned int id)
   while (p)
   {
     if (p->is_server == 0 && p->id == id) return p;
-    p = p->next;
-  }
-  return NULL;
-}
-
-static Connection *
-_connection_find_by_fd(int fd)
-{
-  Connection *p = _connections;
-  while (p)
-  {
-    if (p->fd == fd) return p;
     p = p->next;
   }
   return NULL;
