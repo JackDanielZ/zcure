@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <getopt.h>
+#include <sys/un.h>
 
 #include <openssl/pem.h>
 #include <openssl/crypto.h>
@@ -29,55 +30,85 @@ typedef enum
   STATE_OPERATIONAL
 } Connection_State;
 
-typedef struct
+struct _Connection
 {
+  unsigned int is_server;
+
   int fd;
+
   Connection_State state;
-  unsigned char aes_gcm_key[32];
-  unsigned char aes_gcm_iv[AES_BLOCK_SIZE];
-} Connection;
 
-typedef int (*service_cb)(void *data, unsigned int data_len, void *user_data);
+  union
+  {
+    struct // client
+    {
+      struct _Connection *service; /* Connection to the server */
 
-struct _Service
-{
-  const char *name;
-  unsigned int id;
+      unsigned int id;
 
-  service_cb cb;
-  void *user_data;
+      unsigned char aes_gcm_key[32];
+      unsigned char aes_gcm_iv[AES_BLOCK_SIZE];
+    };
+    struct // server
+    {
+      const char *name;
+    };
+  };
 
-  struct _Service *next;
-} _Service;
+  struct _Connection *next;
+  struct _Connection *prev;
+} _Connection;
 
-typedef struct _Service Service;
+typedef struct _Connection Connection;
+
+static Connection *_connections = NULL;
+
+static unsigned int _last_id = 0;
 
 static const char *_port = NULL;
 
-static Service *_services = NULL;
-
-static Service *
-_service_find_by_id(unsigned int id)
+static Connection *
+_server_find_by_name(const char *name)
 {
-  Service *s = _services;
-  while (s)
+  Connection *p = _connections;
+  while (p)
   {
-    if (s->id == id) return s;
-    s = s->next;
+    if (p->is_server && !strcmp(p->name, name)) return p;
+    p = p->next;
   }
   return NULL;
 }
 
-static Service *
-_service_find_by_name(const char *name)
+static Connection *
+_client_find_by_id(unsigned int id)
 {
-  Service *s = _services;
-  while (s)
+  Connection *p = _connections;
+  while (p)
   {
-    if (!strcmp(s->name, name)) return s;
-    s = s->next;
+    if (p->is_server == 0 && p->id == id) return p;
+    p = p->next;
   }
   return NULL;
+}
+
+static Connection *
+_connection_find_by_fd(int fd)
+{
+  Connection *p = _connections;
+  while (p)
+  {
+    if (p->fd == fd) return p;
+    p = p->next;
+  }
+  return NULL;
+}
+
+static void
+_connection_free(Connection *conn)
+{
+  if (conn->prev) conn->prev->next = conn->next;
+  if (conn->next) conn->next->prev = conn->prev;
+  free(conn);
 }
 
 static int
@@ -150,37 +181,146 @@ _server_create(const char *port)
   sfd = -1;
 
 exit:
-  freeaddrinfo(result);           /* No longer needed */
+  freeaddrinfo(result); /* No longer needed */
 
   return sfd;
 }
 
 static int
-_dispatch_request(Connection *conn, void *data, unsigned int data_len)
+_create_local_socket(const char *filename)
 {
-  unsigned int service_id = *(unsigned int *)data;
-  Service *svc = _service_find_by_id(service_id);
+  struct sockaddr_un name;
+  int sock;
+  int yes=1;
 
-  data = (char *)data + sizeof(service_id);
-  data_len -= sizeof(service_id);
-
-  if (!svc)
+  /* Create the socket. */
+  sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (sock < 0)
   {
-    fprintf(stderr, "Service %d unknown\n", service_id);
+    perror("socket");
     return -1;
   }
 
-  if (!svc->cb)
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
   {
-    fprintf(stderr, "No callback for service %d\n", service_id);
+    perror("setsockopt");
     return -1;
   }
 
-  return svc->cb(data, data_len, svc->user_data);
+  /* Bind a name to the socket. */
+  name.sun_family = AF_UNIX;
+  strncpy(name.sun_path, filename, sizeof(name.sun_path));
+  name.sun_path[sizeof(name.sun_path) - 1] = '\0';
+
+  if (bind(sock, (struct sockaddr *)&name, sizeof(struct sockaddr_un)) < 0)
+  {
+    perror("bind");
+    return -1;
+  }
+
+  listen(sock, 5);
+
+  return sock;
 }
 
 static int
-_handle_connection(Connection *conn)
+_handle_server(Connection *conn)
+{
+  int rv;
+
+  switch (conn->state)
+  {
+    case STATE_WAIT_FOR_CONNECTION_REQUEST:
+    {
+      char service[SERVICE_SIZE];
+
+      memset(service, 0, sizeof(service));
+
+      rv = recv(conn->fd, service, sizeof(service), 0);
+      if (rv <= 0)
+      {
+        if (rv < 0) perror("recv");
+        return -1;
+      }
+
+      if (memchr(service, '\0', sizeof(service)) == NULL)
+      {
+        return -1;
+      }
+
+      if (_server_find_by_name(service))
+      {
+        return -1;
+      }
+
+      conn->name = strdup(service);
+      conn->state = STATE_OPERATIONAL;
+      break;
+    }
+    case STATE_OPERATIONAL:
+    {
+      Connection *client;
+      Server_Data_Info s_info;
+      Client_Data_Info *c_info;
+      char *data;
+
+      memset(&s_info, 0, sizeof(s_info));
+
+      rv = recv(conn->fd, &s_info, sizeof(s_info), 0);
+      if (rv <= 0 || rv != sizeof(s_info))
+      {
+        if (rv < 0) perror("recv Server_Data_Info");
+        return -1;
+      }
+
+      client = _client_find_by_id(s_info.client_id);
+      if (client == NULL)
+      {
+        fprintf(stderr, "Client with id %d not found\n", s_info.client_id);
+        /* Positive return code to not close the server connection when a client disconnected suddenly */
+        return 1;
+      }
+
+      // FIXME: check size limitation
+
+      data = malloc(sizeof(Client_Data_Info) + s_info.size);
+      c_info = (Client_Data_Info *)data;
+      c_info->size = s_info.size;
+
+      rv = recv(conn->fd, data + sizeof(Client_Data_Info), c_info->size, 0);
+      if (rv <= 0)
+      {
+        if (rv < 0) perror("recv");
+        return -1;
+      }
+
+      rv = zcure_gcm_encrypt(client->aes_gcm_key, client->aes_gcm_iv, sizeof(client->aes_gcm_iv),
+                             data, sizeof(c_info->size),
+                             data + sizeof(Client_Data_Info), c_info->size,
+                             data + sizeof(Client_Data_Info),
+                             c_info->tag, sizeof(c_info->tag));
+      if (rv != 0)
+      {
+        fprintf(stderr, "zcure_gcm_encrypt to client failed\n");
+        return -1;
+      }
+
+      rv = send(client->fd, data, sizeof(Client_Data_Info) + c_info->size, 0);
+
+      free(data);
+
+      return rv;
+    }
+    default:
+    {
+      return -1;
+    }
+  }
+  return 1;
+}
+
+static int
+_handle_client(Connection *conn)
 {
   int rv;
 
@@ -203,7 +343,10 @@ _handle_connection(Connection *conn)
         return -1;
       }
 
-      // FIXME: check username size before use
+      if (memchr(conn_req.username, '\0', sizeof(conn_req.username)) == NULL)
+      {
+        return -1;
+      }
 
       ecdh_key = zcure_ecdh_key_compute_for_username(conn_req.username, conn_req.salt, sizeof(conn_req.salt), secret_len);
 
@@ -251,34 +394,55 @@ _handle_connection(Connection *conn)
     }
     case STATE_OPERATIONAL:
     {
-      unsigned char buf[10000];
-      int data_size;
+      Client_Data_Info c_info;
+      Server_Data_Info *s_info;
+      char *data;
 
-      /* Receive the encrypted CCRsp */
-      data_size = recv(conn->fd, buf, sizeof(buf), 0);
-      if (data_size <= 0)
+      rv = recv(conn->fd, &c_info, sizeof(Client_Data_Info), 0);
+      if (rv != sizeof(Client_Data_Info))
       {
-        if (data_size < 0) perror("recv");
+        if (rv < 0) perror("recv Client_Data_Info");
         return -1;
       }
 
-      /* Decrypt data */
+      // FIXME: check size limitation
+
+      data = malloc(sizeof(Server_Data_Info) + c_info.size);
+      s_info = (Server_Data_Info *)data;
+      s_info->size = c_info.size;
+      s_info->client_id = conn->id;
+
+      rv = recv(conn->fd, data + sizeof(Server_Data_Info), s_info->size, 0);
+      if (rv <= 0)
+      {
+        if (rv < 0) perror("recv");
+        return -1;
+      }
+
       rv = zcure_gcm_decrypt(conn->aes_gcm_key, conn->aes_gcm_iv, sizeof(conn->aes_gcm_iv),
-                             NULL, 0,
-                             buf + 16, data_size - 16,
-                             buf + 16,
-                             buf, 16);
+                             &c_info, sizeof(c_info.size),
+                             data + sizeof(Server_Data_Info), s_info->size,
+                             data + sizeof(Server_Data_Info),
+                             c_info.tag, sizeof(c_info.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "Decryption failed\n");
+        fprintf(stderr, "zcure_gcm_decrypt from client failed\n");
         return -1;
       }
 
-      _dispatch_request(conn, buf + 16, data_size - 16);
+      if (conn->service)
+      {
+        rv = send(conn->service->fd, data, sizeof(Server_Data_Info) + s_info->size, 0);
+      }
+      else
+      {
+        fprintf(stderr, "No server for the client %d\n", conn->id);
+        rv = -1;
+      }
 
-      printf("Received buffer of size %d\n", data_size - 16);
-      /* FIXME Here we should extract the service, convert to a fd and send the data there */
-      return data_size - 16;
+      free(data);
+
+      return rv;
     }
   }
 
@@ -299,10 +463,9 @@ _help(const char *prg_name)
 
 int main(int argc, char **argv)
 {
-  int master_fd = -1, epoll_fd = -1, event_count, i;
+  int master_fd = -1, local_fd = -1, epoll_fd = -1, event_count, i;
   int rv = EXIT_FAILURE;
   struct epoll_event event, events[MAX_EVENTS];
-  Connection master_conn;
 
   while (1)
   {
@@ -347,11 +510,26 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  master_conn.fd = master_fd;
   event.events = EPOLLIN | EPOLLET;
-  event.data.ptr = &master_conn;
+  event.data.fd = master_fd;
 
   if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, master_fd, &event))
+  {
+    perror("epoll_ctl");
+    goto exit;
+  }
+
+  local_fd = _create_local_socket("/tmp/zcure_server");
+  if (local_fd == -1)
+  {
+    fprintf(stderr, "Cannot create a local socket\n");
+    return EXIT_FAILURE;
+  }
+
+  event.events = EPOLLIN | EPOLLET;
+  event.data.fd = local_fd;
+
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, local_fd, &event))
   {
     perror("epoll_ctl");
     goto exit;
@@ -363,35 +541,93 @@ int main(int argc, char **argv)
 
     for (i = 0; i < event_count; i++)
     {
-      Connection *conn = events[i].data.ptr;
-      if (conn->fd == master_fd)
+      if (events[i].data.fd == master_fd)
       {
+        /* New secure connection */
+        Connection *conn;
         int new_fd;
         struct sockaddr in_addr;
         socklen_t in_len = sizeof in_addr;
         new_fd = accept(master_fd, &in_addr, &in_len);
         if (new_fd == -1)
         {
-          perror("accept");
+          perror("accept tcp");
           return EXIT_FAILURE;
         }
-        conn = calloc(1, sizeof(Connection));
-        conn->fd = new_fd;
-        event.data.ptr = conn;
+        event.data.fd = new_fd;
         event.events = EPOLLIN | EPOLLET;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
           perror("epoll_ctl");
           return EXIT_FAILURE;
         }
+
+        conn = calloc(1, sizeof(Connection));
+        conn->is_server = 0;
+        conn->fd = new_fd;
+        conn->state = STATE_WAIT_FOR_CONNECTION_REQUEST;
+        conn->id = ++_last_id;
+
+        conn->next = _connections;
+        _connections->prev = conn;
+        _connections = conn;
       }
-      else {
-        if (_handle_connection(conn) <= 0)
+      else if (events[i].data.fd == local_fd)
+      {
+        /* New local connection */
+        Connection *conn;
+        int new_fd;
+        struct sockaddr in_addr;
+        socklen_t in_len = sizeof in_addr;
+        new_fd = accept(local_fd, &in_addr, &in_len);
+        if (new_fd == -1)
         {
-          /* Closing connection */
-          close(conn->fd);
-          epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
-          free(conn);
+          perror("accept local");
+          return EXIT_FAILURE;
+        }
+        event.data.fd = new_fd;
+        event.events = EPOLLIN | EPOLLET;
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
+        {
+          perror("epoll_ctl");
+          return EXIT_FAILURE;
+        }
+
+        conn = calloc(1, sizeof(Connection));
+        conn->is_server = 1;
+        conn->fd = new_fd;
+        conn->state = STATE_WAIT_FOR_CONNECTION_REQUEST;
+        conn->next = _connections;
+        _connections->prev = conn;
+        _connections = conn;
+      }
+      else
+      {
+        Connection *conn = events[i].data.ptr;
+        if (conn != NULL)
+        {
+          if (events[i].events & EPOLLRDHUP)
+          {
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
+            _connection_free(conn);
+          }
+          else
+          {
+            if (conn->is_server)
+            {
+              if (_handle_server(conn) <= 0)
+              {
+                close(conn->fd);
+              }
+            }
+            else
+            {
+              if (_handle_client(conn) <= 0)
+              {
+                close(conn->fd);
+              }
+            }
+          }
         }
       }
     }
@@ -401,6 +637,8 @@ exit:
   if (epoll_fd != -1 && close(epoll_fd)) perror("close");
 
   if (master_fd != -1 && close(master_fd)) perror("close");
+
+  if (local_fd != -1 && close(local_fd)) perror("close");
 
   return rv;
 }

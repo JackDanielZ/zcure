@@ -5,7 +5,9 @@
 
 #define AES_BLOCK_SIZE 16
 
-#define CERT_GET_OP 0
+#define USERNAME_SIZE 32
+
+#define SERVICE_SIZE 32
 
 /*
 Alice: calculate ECDH(Alice, Bob) -> key
@@ -28,9 +30,9 @@ Alice:
  */
 typedef struct
 {
-  char username[32]; /* Must be terminated with '\0' */
+  char username[USERNAME_SIZE]; /* Must be terminated with '\0' */
   uint8_t salt[128];
-  char service[32]; /* Must be terminated with '\0' */
+  char service[SERVICE_SIZE]; /* Must be terminated with '\0' */
   uint8_t tag[16];
 } ConnectionRequest;
 
@@ -45,6 +47,18 @@ typedef struct
   uint8_t aes_gcm_iv[AES_BLOCK_SIZE];
   uint8_t tag[16];
 } ConnectionResponse;
+
+typedef struct
+{
+  uint32_t size;
+  uint32_t client_id;
+} Server_Data_Info;
+
+typedef struct
+{
+  uint32_t size;
+  uint8_t tag[16];
+} Client_Data_Info;
 
 unsigned char *
 get_file_content_as_string(const char *filename, unsigned int *size);
