@@ -73,7 +73,7 @@ _server_find_by_name(const char *name)
   Connection *p = _connections;
   while (p)
   {
-    if (p->is_server && !strcmp(p->name, name)) return p;
+    if (p->is_server && p->name && !strcmp(p->name, name)) return p;
     p = p->next;
   }
   return NULL;
@@ -96,6 +96,7 @@ _connection_free(Connection *conn)
 {
   if (conn->prev) conn->prev->next = conn->next;
   if (conn->next) conn->next->prev = conn->prev;
+  if (_connections == conn) _connections = conn->next;
   free(conn);
 }
 
@@ -220,6 +221,7 @@ _handle_server(Connection *conn)
   {
     case STATE_WAIT_FOR_CONNECTION_REQUEST:
     {
+      Connection *server_conn;
       char service[SERVICE_SIZE];
 
       memset(service, 0, sizeof(service));
@@ -233,16 +235,23 @@ _handle_server(Connection *conn)
 
       if (memchr(service, '\0', sizeof(service)) == NULL)
       {
+        send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
 
-      if (_server_find_by_name(service))
+      server_conn = _server_find_by_name(service);
+      if (server_conn && server_conn->fd != 0)
       {
+        send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
 
       conn->name = strdup(service);
       conn->state = STATE_OPERATIONAL;
+
+      printf("Service %s registered\n", service);
+
+      send(conn->fd, &(int){0}, sizeof(int), 0);
       break;
     }
     case STATE_OPERATIONAL:
@@ -373,6 +382,7 @@ _handle_client(Connection *conn)
       }
 
       conn->state = STATE_OPERATIONAL;
+      conn->service = _server_find_by_name(conn_req.service);
 
       memset(ecdh_key, '0', secret_len);
       free(ecdh_key);
@@ -400,7 +410,7 @@ _handle_client(Connection *conn)
       s_info->size = c_info.size;
       s_info->client_id = conn->id;
 
-      rv = recv(conn->fd, data + sizeof(Server_Data_Info), s_info->size, 0);
+      rv = recv(conn->fd, data + sizeof(Server_Data_Info), c_info.size, 0);
       if (rv <= 0)
       {
         if (rv < 0) perror("recv");
@@ -409,7 +419,7 @@ _handle_client(Connection *conn)
 
       rv = zcure_gcm_decrypt(conn->aes_gcm_key, conn->aes_gcm_iv, sizeof(conn->aes_gcm_iv),
                              &c_info, sizeof(c_info.size),
-                             data + sizeof(Server_Data_Info), s_info->size,
+                             data + sizeof(Server_Data_Info), c_info.size,
                              data + sizeof(Server_Data_Info),
                              c_info.tag, sizeof(c_info.tag));
       if (rv != 0)
@@ -453,7 +463,7 @@ int main(int argc, char **argv)
 {
   int master_fd = -1, local_fd = -1, epoll_fd = -1, event_count, i;
   int rv = EXIT_FAILURE;
-  struct epoll_event event, events[MAX_EVENTS];
+  struct epoll_event event = {0}, events[MAX_EVENTS];
 
   while (1)
   {
@@ -542,13 +552,6 @@ int main(int argc, char **argv)
           perror("accept tcp");
           return EXIT_FAILURE;
         }
-        event.data.fd = new_fd;
-        event.events = EPOLLIN | EPOLLET;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
-        {
-          perror("epoll_ctl");
-          return EXIT_FAILURE;
-        }
 
         conn = calloc(1, sizeof(Connection));
         conn->is_server = 0;
@@ -557,8 +560,18 @@ int main(int argc, char **argv)
         conn->id = ++_last_id;
 
         conn->next = _connections;
-        _connections->prev = conn;
+        if (_connections) _connections->prev = conn;
         _connections = conn;
+
+        event.data.ptr = conn;
+        event.events = EPOLLIN | EPOLLET;
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
+        {
+          perror("epoll_ctl");
+          return EXIT_FAILURE;
+        }
+
+        printf("New client %d\n", conn->id);
       }
       else if (events[i].data.fd == local_fd)
       {
@@ -573,28 +586,30 @@ int main(int argc, char **argv)
           perror("accept local");
           return EXIT_FAILURE;
         }
-        event.data.fd = new_fd;
+
+        conn = calloc(1, sizeof(Connection));
+        conn->is_server = 1;
+        conn->fd = new_fd;
+        conn->state = STATE_WAIT_FOR_CONNECTION_REQUEST;
+
+        conn->next = _connections;
+        if (_connections) _connections->prev = conn;
+        _connections = conn;
+
+        event.data.ptr = conn;
         event.events = EPOLLIN | EPOLLET;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
           perror("epoll_ctl");
           return EXIT_FAILURE;
         }
-
-        conn = calloc(1, sizeof(Connection));
-        conn->is_server = 1;
-        conn->fd = new_fd;
-        conn->state = STATE_WAIT_FOR_CONNECTION_REQUEST;
-        conn->next = _connections;
-        _connections->prev = conn;
-        _connections = conn;
       }
       else
       {
         Connection *conn = events[i].data.ptr;
         if (conn != NULL)
         {
-          if (events[i].events & EPOLLRDHUP)
+          if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
             _connection_free(conn);

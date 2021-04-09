@@ -205,18 +205,22 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
 {
   void *cipher_buffer = NULL;
   unsigned int nb_sent_bytes;
+  Client_Data_Info *c_info;
   struct Connection *c = _connection_find_by_cid(cid);
   int rv;
 
   if (!c) return -1;
 
-  cipher_buffer = malloc(16 + plain_size);
-  rv = zcure_gcm_encrypt(c->aes_gcm_key,
-                         c->aes_gcm_iv, sizeof(c->aes_gcm_iv),
-                         NULL, 0,
+  cipher_buffer = malloc(sizeof(Client_Data_Info) + plain_size);
+
+  c_info = (Client_Data_Info *)cipher_buffer;
+  c_info->size = plain_size;
+
+  rv = zcure_gcm_encrypt(c->aes_gcm_key, c->aes_gcm_iv, sizeof(c->aes_gcm_iv),
+                         c_info, sizeof(c_info->size),
                          plain_buffer, plain_size,
-                         cipher_buffer + 16,
-                         cipher_buffer, 16);
+                         cipher_buffer + sizeof(Client_Data_Info),
+                         c_info->tag, sizeof(c_info->tag));
   if (rv != 0)
   {
     fprintf(stderr, "Cannot gcm encrypt data\n");
@@ -224,46 +228,60 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
   }
   else
   {
-    nb_sent_bytes = send(cid, cipher_buffer, 16 + plain_size, 0);
-    if (nb_sent_bytes != 16 + plain_size)
+    nb_sent_bytes = send(c->fd, cipher_buffer, sizeof(Client_Data_Info) + plain_size, 0);
+    if (nb_sent_bytes != sizeof(Client_Data_Info) + plain_size)
     {
       fprintf(stderr, "Cannot send all the data through the secure channel\n");
       return -1;
     }
   }
+
+  free(cipher_buffer);
+
   return plain_size;
 }
 
 int zcure_client_receive(int cid, void **plain_buffer)
 {
-  unsigned char recv_buffer[10000];
-  unsigned int nb_recv_bytes;
-  int rv;
+  void *cipher_buffer = NULL;
+  Client_Data_Info c_info;
   struct Connection *c = _connection_find_by_cid(cid);
+  int rv;
+
+  if (!plain_buffer) return -1;
 
   if (!c) return -1;
 
-  nb_recv_bytes = recv(cid, recv_buffer, sizeof(recv_buffer), 0);
-  if (nb_recv_bytes <= 0)
+  rv = recv(c->fd, &c_info, sizeof(Client_Data_Info), 0);
+  if (rv != sizeof(Client_Data_Info))
   {
-    fprintf(stderr, "Failed to receive data\n");
+    perror("recv info from server");
     return -1;
   }
 
-  *plain_buffer = malloc(nb_recv_bytes - 16);
+  cipher_buffer = malloc(c_info.size);
+
+  rv = recv(c->fd, cipher_buffer, c_info.size, 0);
+  if (rv != (int)c_info.size)
+  {
+    perror("recv data from server");
+    return -1;
+  }
 
   rv = zcure_gcm_decrypt(c->aes_gcm_key, c->aes_gcm_iv, sizeof(c->aes_gcm_iv),
-                         NULL, 0,
-                         recv_buffer + 16, nb_recv_bytes - 16,
-                         *plain_buffer,
-                         recv_buffer, 16);
+                         &c_info, sizeof(c_info.size),
+                         cipher_buffer, c_info.size,
+                         cipher_buffer,
+                         c_info.tag, sizeof(c_info.tag));
   if (rv != 0)
   {
     fprintf(stderr, "Cannot GCM decrypt data\n");
     return -1;
   }
 
-  return nb_recv_bytes - 16;
+  *plain_buffer = cipher_buffer;
+
+  return c_info.size;
 }
 
 int

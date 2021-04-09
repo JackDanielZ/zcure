@@ -9,6 +9,11 @@
 
 #define SERVICE_SIZE 32
 
+#define PRINT_BUFFER(name, buf, size) \
+  printf("%s:\n  ", name); \
+  for (unsigned int __i = 0; __i < size; __i++) printf("%02X ", ((unsigned char *)buf)[__i]); \
+  printf("\n");
+
 /*
 Alice: calculate ECDH(Alice, Bob) -> key
 Alice->Bob: gcm_encrypt(key, {"Alice", service}, tag)
