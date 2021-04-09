@@ -179,7 +179,6 @@ _create_local_socket(const char *filename)
 {
   struct sockaddr_un name;
   int sock;
-  int yes=1;
 
   /* Create the socket. */
   sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -189,7 +188,7 @@ _create_local_socket(const char *filename)
     return -1;
   }
 
-  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1)
   {
     perror("setsockopt");
     return -1;
@@ -199,6 +198,7 @@ _create_local_socket(const char *filename)
   name.sun_family = AF_UNIX;
   strncpy(name.sun_path, filename, sizeof(name.sun_path));
   name.sun_path[sizeof(name.sun_path) - 1] = '\0';
+  name.sun_path[0] = '\0';
 
   if (bind(sock, (struct sockaddr *)&name, sizeof(struct sockaddr_un)) < 0)
   {
@@ -507,7 +507,7 @@ int main(int argc, char **argv)
     goto exit;
   }
 
-  local_fd = _create_local_socket("/tmp/zcure_server");
+  local_fd = _create_local_socket("#zcure_server");
   if (local_fd == -1)
   {
     fprintf(stderr, "Cannot create a local socket\n");
