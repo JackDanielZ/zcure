@@ -11,6 +11,7 @@
 #include <sys/un.h>
 
 #include "common/common.h"
+#include "server.h"
 
 int zcure_server_register(const char *service)
 {
@@ -59,7 +60,7 @@ err:
 
 int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsigned int plain_size)
 {
-  Server_Data_Info s_info;
+  ServerApp2Server_Data_Info s_info;
   int rv;
 
   s_info.size = plain_size;
@@ -68,7 +69,7 @@ int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsi
   rv = send(fd, &s_info, sizeof(s_info), 0);
   if (rv <= 0)
   {
-    perror("send Server_Data_Info");
+    perror("send ServerApp2Server_Data_Info");
     return -1;
   }
 
@@ -82,26 +83,23 @@ int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsi
   return rv;
 }
 
-int zcure_server_receive(int fd, void **plain_buffer, uint32_t *client_id)
+int zcure_server_receive(int fd, void **plain_buffer, Client_Info *client_info)
 {
   int rv;
-  Server_Data_Info s_info;
 
-  if (!client_id || !plain_buffer) return -1;
+  if (!plain_buffer || !client_info) return -1;
 
-  rv = recv(fd, &s_info, sizeof(Server_Data_Info), 0);
-  if (rv <= 0 || rv != sizeof(Server_Data_Info))
+  rv = recv(fd, client_info, sizeof(Server2ServerApp_Data_Info), 0);
+  if (rv <= 0 || rv != sizeof(Server2ServerApp_Data_Info))
   {
-    if (rv < 0) perror("recv Server_Data_Info");
+    if (rv < 0) perror("recv Server2ServerApp_Data_Info");
     return -1;
   }
 
-  *client_id = s_info.client_id;
-
   // FIXME: check size limitation
 
-  *plain_buffer = malloc(s_info.size);
-  rv = recv(fd, *plain_buffer, s_info.size, 0);
+  *plain_buffer = malloc(client_info->size);
+  rv = recv(fd, *plain_buffer, client_info->size, 0);
   if (rv <= 0)
   {
     if (rv < 0) perror("recv data");

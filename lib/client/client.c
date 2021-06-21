@@ -116,8 +116,8 @@ zcure_client_connect(const char *server, const char *port, const char *username,
   int fd;
   unsigned char *ecdh_key = NULL;
   int secret_len = 32;
-  ConnectionRequest conn_req;
-  ConnectionResponse conn_rsp;
+  ClientConnectionRequest conn_req;
+  ClientConnectionResponse conn_rsp;
   unsigned char iv0[12] = {0};
   int size;
   int rv;
@@ -149,20 +149,20 @@ zcure_client_connect(const char *server, const char *port, const char *username,
                          conn_req.tag, sizeof(conn_req.tag));
   if (rv != 0)
   {
-    fprintf(stderr, "GCM Encryption of ConnectionRequest failed\n");
+    fprintf(stderr, "GCM Encryption of ClientConnectionRequest failed\n");
     return -1;
   }
 
-  if (send(fd, &conn_req, sizeof(ConnectionRequest), 0) != sizeof(ConnectionRequest))
+  if (send(fd, &conn_req, sizeof(ClientConnectionRequest), 0) != sizeof(ClientConnectionRequest))
   {
-    fprintf(stderr, "Sending ConnectionRequest failed\n");
+    fprintf(stderr, "Sending ClientConnectionRequest failed\n");
     return -1;
   }
 
   size = recv(fd, &conn_rsp, sizeof(conn_rsp), 0);
   if (size <= 0)
   {
-    fprintf(stderr, "Error in reception of ConnectionResponse\n");
+    fprintf(stderr, "Error in reception of ClientConnectionResponse\n");
     return -1;
   }
 
@@ -173,7 +173,7 @@ zcure_client_connect(const char *server, const char *port, const char *username,
                          conn_rsp.tag, sizeof(conn_rsp.tag));
   if (rv != 0)
   {
-    fprintf(stderr, "GCM Decryption of ConnectionResponse failed\n");
+    fprintf(stderr, "GCM Decryption of ClientConnectionResponse failed\n");
     return -1;
   }
 

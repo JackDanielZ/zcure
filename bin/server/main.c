@@ -20,6 +20,7 @@
 #include <openssl/ssl.h>
 
 #include "common/common.h"
+#include "lib/server/server.h"
 
 #define BUF_SIZE 500
 #define MAX_EVENTS 5
@@ -40,18 +41,20 @@ struct _Connection
 
   union
   {
+    /*
+     * Server: service name
+     * Client: username
+     */
+    const char *name;
     struct // client
     {
       struct _Connection *service; /* Connection to the server */
 
       unsigned int id;
+      uint32_t ip;
 
       unsigned char aes_gcm_key[32];
       unsigned char aes_gcm_iv[AES_BLOCK_SIZE];
-    };
-    struct // server
-    {
-      const char *name;
     };
   };
 
@@ -233,12 +236,14 @@ _handle_server(Connection *conn)
         return -1;
       }
 
+      /* Check the service is a NULL terminated string */
       if (memchr(service, '\0', sizeof(service)) == NULL)
       {
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
 
+      /* Check the no app is already connected to the requested service */
       server_conn = _server_find_by_name(service);
       if (server_conn && server_conn->fd != 0)
       {
@@ -257,7 +262,7 @@ _handle_server(Connection *conn)
     case STATE_OPERATIONAL:
     {
       Connection *client;
-      Server_Data_Info s_info;
+      ServerApp2Server_Data_Info s_info;
       Client_Data_Info *c_info;
       char *data;
 
@@ -266,7 +271,7 @@ _handle_server(Connection *conn)
       rv = recv(conn->fd, &s_info, sizeof(s_info), 0);
       if (rv <= 0 || rv != sizeof(s_info))
       {
-        if (rv < 0) perror("recv Server_Data_Info");
+        if (rv < 0) perror("recv Server2ServerApp_Data_Info");
         return -1;
       }
 
@@ -291,6 +296,10 @@ _handle_server(Connection *conn)
         return -1;
       }
 
+      /*
+       * Data to authenticate: size + data
+       * Data to decrypt: data
+       */
       rv = zcure_gcm_encrypt(client->aes_gcm_key, client->aes_gcm_iv, sizeof(client->aes_gcm_iv),
                              data, sizeof(c_info->size),
                              data + sizeof(Client_Data_Info), c_info->size,
@@ -329,17 +338,18 @@ _handle_client(Connection *conn)
       unsigned char *ecdh_key = NULL;
       int secret_len = 32;
       unsigned char iv0[12] = {0};
-      ConnectionRequest conn_req;
-      ConnectionResponse conn_rsp;
+      ClientConnectionRequest conn_req;
+      ClientConnectionResponse conn_rsp;
 
-      /* Receive the encrypted CCReq */
-      data_size = recv(conn->fd, &conn_req, sizeof(ConnectionRequest), 0);
-      if (data_size != sizeof(ConnectionRequest))
+      /* Receive the encrypted ClientConnectionRequest */
+      data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), 0);
+      if (data_size != sizeof(ClientConnectionRequest))
       {
         if (data_size < 0) perror("recv");
         return -1;
       }
 
+      /* Check the username is a NULL terminated string */
       if (memchr(conn_req.username, '\0', sizeof(conn_req.username)) == NULL)
       {
         return -1;
@@ -351,6 +361,10 @@ _handle_client(Connection *conn)
         printf("%02X ", ecdh_key[i]);
       printf("\n");
 
+      /*
+       * Data to authenticate: username + salt + service
+       * Data to decrypt: service
+       */
       rv = zcure_gcm_decrypt(ecdh_key, iv0, sizeof(iv0),
                              conn_req.username, sizeof(conn_req.username) + sizeof(conn_req.salt),
                              conn_req.service, sizeof(conn_req.service),
@@ -358,7 +372,7 @@ _handle_client(Connection *conn)
                              conn_req.tag, sizeof(conn_req.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "GCM Decryption of ConnectionRequest failed\n");
+        fprintf(stderr, "GCM Decryption of ClientConnectionRequest failed\n");
         return -1;
       }
 
@@ -370,6 +384,9 @@ _handle_client(Connection *conn)
       memcpy(conn->aes_gcm_iv, conn_rsp.aes_gcm_iv, sizeof(conn_rsp.aes_gcm_iv));
       conn_rsp.status = 0;
 
+      /*
+       * Data to encrypt: response - tag
+       */
       rv = zcure_gcm_encrypt(ecdh_key, iv0, sizeof(iv0),
                              NULL, 0,
                              &conn_rsp, sizeof(conn_rsp) - sizeof(conn_rsp.tag),
@@ -377,25 +394,27 @@ _handle_client(Connection *conn)
                              conn_rsp.tag, sizeof(conn_rsp.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "GCM Encryption of ConnectionResponse failed\n");
+        fprintf(stderr, "GCM Encryption of ClientConnectionResponse failed\n");
         return -1;
       }
 
       conn->state = STATE_OPERATIONAL;
+      conn->name = strdup(conn_req.username);
       conn->service = _server_find_by_name(conn_req.service);
 
       memset(ecdh_key, '0', secret_len);
       free(ecdh_key);
 
-      /* Send the encrypted SCRsp */
+      /* Send the encrypted ClientConnectionResponse */
       return send(conn->fd, &conn_rsp, sizeof(conn_rsp), 0);
     }
     case STATE_OPERATIONAL:
     {
       Client_Data_Info c_info;
-      Server_Data_Info *s_info;
+      Server2ServerApp_Data_Info *s_info;
       char *data;
 
+      /* Receive the header */
       rv = recv(conn->fd, &c_info, sizeof(Client_Data_Info), 0);
       if (rv != sizeof(Client_Data_Info))
       {
@@ -405,22 +424,29 @@ _handle_client(Connection *conn)
 
       // FIXME: check size limitation
 
-      data = malloc(sizeof(Server_Data_Info) + c_info.size);
-      s_info = (Server_Data_Info *)data;
-      s_info->size = c_info.size;
-      s_info->client_id = conn->id;
+      data = malloc(sizeof(Server2ServerApp_Data_Info) + c_info.size);
+      memset(data, 0, sizeof(Server2ServerApp_Data_Info));
+      s_info = (Server2ServerApp_Data_Info *)data;
+      s_info->client.size = c_info.size;
+      s_info->client.id = conn->id;
+      strcpy(s_info->client.name, conn->name);
+      s_info->client.ip = conn->ip;
 
-      rv = recv(conn->fd, data + sizeof(Server_Data_Info), c_info.size, 0);
+      rv = recv(conn->fd, data + sizeof(Server2ServerApp_Data_Info), c_info.size, 0);
       if (rv <= 0)
       {
         if (rv < 0) perror("recv");
         return -1;
       }
 
+      /*
+       * Data to authenticate: size + data
+       * Data to decrypt: data
+       */
       rv = zcure_gcm_decrypt(conn->aes_gcm_key, conn->aes_gcm_iv, sizeof(conn->aes_gcm_iv),
                              &c_info, sizeof(c_info.size),
-                             data + sizeof(Server_Data_Info), c_info.size,
-                             data + sizeof(Server_Data_Info),
+                             data + sizeof(Server2ServerApp_Data_Info), c_info.size,
+                             data + sizeof(Server2ServerApp_Data_Info),
                              c_info.tag, sizeof(c_info.tag));
       if (rv != 0)
       {
@@ -430,7 +456,7 @@ _handle_client(Connection *conn)
 
       if (conn->service)
       {
-        rv = send(conn->service->fd, data, sizeof(Server_Data_Info) + s_info->size, 0);
+        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Data_Info) + s_info->client.size, 0);
       }
       else
       {
@@ -541,12 +567,12 @@ int main(int argc, char **argv)
     {
       if (events[i].data.fd == master_fd)
       {
-        /* New secure connection */
+        /* New secure connection from client */
         Connection *conn;
         int new_fd;
-        struct sockaddr in_addr;
+        struct sockaddr_in in_addr;
         socklen_t in_len = sizeof in_addr;
-        new_fd = accept(master_fd, &in_addr, &in_len);
+        new_fd = accept(master_fd, (struct sockaddr *)&in_addr, &in_len);
         if (new_fd == -1)
         {
           perror("accept tcp");
@@ -558,6 +584,7 @@ int main(int argc, char **argv)
         conn->fd = new_fd;
         conn->state = STATE_WAIT_FOR_CONNECTION_REQUEST;
         conn->id = ++_last_id;
+        conn->ip = in_addr.sin_addr.s_addr;
 
         conn->next = _connections;
         if (_connections) _connections->prev = conn;
@@ -575,7 +602,7 @@ int main(int argc, char **argv)
       }
       else if (events[i].data.fd == local_fd)
       {
-        /* New local connection */
+        /* New local connection from server application */
         Connection *conn;
         int new_fd;
         struct sockaddr in_addr;
@@ -618,6 +645,7 @@ int main(int argc, char **argv)
           {
             if (conn->is_server)
             {
+              /* Data coming from a server application */
               if (_handle_server(conn) <= 0)
               {
                 close(conn->fd);
@@ -625,6 +653,7 @@ int main(int argc, char **argv)
             }
             else
             {
+              /* Data coming from a client */
               if (_handle_client(conn) <= 0)
               {
                 close(conn->fd);

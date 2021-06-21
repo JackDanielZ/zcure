@@ -18,13 +18,13 @@ int main(void)
 
   while (nb > 0)
   {
-    uint32_t client;
+    Client_Info client;
     char *buf = NULL;
     int nb = zcure_server_receive(fd, (void **)&buf, &client);
     if (nb > 0)
     {
-      printf("%d bytes received from client %d\n", nb, client);
-      zcure_server_send(fd, client, buf, nb);
+      printf("%d bytes received from client %d - IP %08X\n", nb, client.id, client.ip);
+      zcure_server_send(fd, client.id, buf, nb);
       free(buf);
     }
   }

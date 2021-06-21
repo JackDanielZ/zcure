@@ -31,7 +31,7 @@ Alice:
 
 /*
  * Username and service sent by the client to the server
- * Encrypted with the server certificate public key
+ * Encrypted with ECDH (server public key, client private key)
  */
 typedef struct
 {
@@ -39,11 +39,11 @@ typedef struct
   uint8_t salt[128];
   char service[SERVICE_SIZE]; /* Must be terminated with '\0' */
   uint8_t tag[16];
-} ConnectionRequest;
+} ClientConnectionRequest;
 
 /*
  * Challenge response + AES key sent by the server to the client
- * Encrypted with the client public key stored into the server database
+ * Encrypted with ECDH(client public key, server private key) stored into the server database
  */
 typedef struct
 {
@@ -51,13 +51,7 @@ typedef struct
   uint8_t aes_gcm_key[32];
   uint8_t aes_gcm_iv[AES_BLOCK_SIZE];
   uint8_t tag[16];
-} ConnectionResponse;
-
-typedef struct
-{
-  uint32_t size;
-  uint32_t client_id;
-} Server_Data_Info;
+} ClientConnectionResponse;
 
 typedef struct
 {
