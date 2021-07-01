@@ -59,7 +59,7 @@ typedef struct
   uint8_t tag[16];
 } Client_Data_Info;
 
-unsigned char *
+char *
 get_file_content_as_string(const char *filename, unsigned int *size);
 
 unsigned char *

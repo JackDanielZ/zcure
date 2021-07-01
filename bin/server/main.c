@@ -39,7 +39,7 @@ struct _Connection
 
   Connection_State state;
 
-  union
+  struct
   {
     /*
      * Server: service name
@@ -243,7 +243,7 @@ _handle_server(Connection *conn)
         return -1;
       }
 
-      /* Check the no app is already connected to the requested service */
+      /* Check that no app is already connected to the requested service */
       server_conn = _server_find_by_name(service);
       if (server_conn && server_conn->fd != 0)
       {

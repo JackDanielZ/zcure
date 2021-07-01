@@ -17,21 +17,21 @@
 
 #include "common/common.h"
 
-unsigned char *
+char *
 get_file_content_as_string(const char *filename, unsigned int *size)
 {
-  unsigned char *file_data = NULL;
+  char *file_data = NULL;
   long fsize = 0;
   FILE *fp;
 
-  if (filename == NULL || size == NULL)
+  if (filename == NULL)
   {
     fprintf(stderr, "Invalid parameters\n");
     return NULL;
   }
 
   fp = fopen(filename, "rb");
-  *size = 0;
+  if (size) *size = 0;
 
   if (fp == NULL)
   {
@@ -51,7 +51,7 @@ get_file_content_as_string(const char *filename, unsigned int *size)
   rewind(fp);
   if (fsize > 0)
   {
-    file_data = (unsigned char *) calloc(1, fsize + 1);
+    file_data = calloc(1, fsize + 1);
     if (!file_data)
     {
       fprintf(stderr, "calloc failed\n");
@@ -63,7 +63,7 @@ get_file_content_as_string(const char *filename, unsigned int *size)
       if (!feof(fp)) fprintf(stderr, "fread failed\n");
     }
     else {
-      *size = fsize;
+      if (size) *size = fsize;
     }
   }
 
@@ -80,7 +80,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   EC_KEY *priv_key;
   const EC_POINT *pub_key;
   BIO *bio;
-  unsigned char *key_file_data;
+  char *key_file_data;
   unsigned char *shared_secret;
   unsigned char *secret;
 
