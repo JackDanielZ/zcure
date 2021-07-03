@@ -6,6 +6,8 @@ CFLAGS := -Wall -Wextra -g3 -fvisibility=default -fPIC -I.
 
 LDFLAGS := -L$(BUILD) -lssl -lcrypto -lcurl -ljson-c
 
+PREFIX ?= /usr
+
 all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_server $(BUILD)/libzcure_server.so $(BUILD)/zcure_server_example $(BUILD)/ip_logger_client $(BUILD)/ip_logger_server
 
 $(BUILD)/%.o: %.c
@@ -36,6 +38,14 @@ $(BUILD)/ip_logger_client: $(BUILD)/bin/ip_logger/client_app.o $(BUILD)/libzcure
 $(BUILD)/ip_logger_server: LDFLAGS += -lzcure_server
 $(BUILD)/ip_logger_server: $(BUILD)/bin/ip_logger/server_app.o $(BUILD)/libzcure_server.so
 	gcc $^ -o $@ $(CFLAGS) $(LDFLAGS)
+
+install:
+	mkdir -p $(PREFIX)/lib/
+	mkdir -p $(PREFIX)/bin/
+	install $(BUILD)/libzcure_client.so $(PREFIX)/lib/
+	install $(BUILD)/libzcure_server.so $(PREFIX)/lib/
+	install $(BUILD)/zcure_server $(PREFIX)/bin/
+	install $(BUILD)/ip_logger_* $(PREFIX)/bin/
 
 clean:
 	rm -rf $(BUILD)/*
