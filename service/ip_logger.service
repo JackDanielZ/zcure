@@ -1,0 +1,12 @@
+[Unit]
+Description=IP logger server
+After=zcure.service
+
+[Service]
+User=daniel
+WorkingDirectory=/home/daniel/
+ExecStart=/usr/bin/ip_logger_server
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
