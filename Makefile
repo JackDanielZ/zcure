@@ -46,6 +46,8 @@ install:
 	install $(BUILD)/libzcure_server.so $(PREFIX)/lib/
 	install $(BUILD)/zcure_server $(PREFIX)/bin/
 	install $(BUILD)/ip_logger_* $(PREFIX)/bin/
+	install service/zcure.service /etc/systemd/system/
+	install service/ip_logger.service /etc/systemd/system/
 
 clean:
 	rm -rf $(BUILD)/*

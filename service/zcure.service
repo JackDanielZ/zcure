@@ -1,0 +1,11 @@
+[Unit]
+Description=Zcure server
+
+[Service]
+User=daniel
+WorkingDirectory=/home/daniel/
+ExecStart=/usr/bin/zcure_server -p 5210
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
