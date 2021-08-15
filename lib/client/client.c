@@ -138,6 +138,12 @@ zcure_client_connect(const char *server, const char *port, const char *username,
   strncpy(conn_req.service, service, sizeof(conn_req.service) - 1);
 
   ecdh_key = zcure_ecdh_key_compute_for_username(server, conn_req.salt, sizeof(conn_req.salt), secret_len);
+  if (!ecdh_key)
+  {
+    fprintf(stderr, "zcure_ecdh_key_compute_for_username for %s failed\n", username);
+    return -1;
+  }
+
   for (int i = 0; i < secret_len; i++)
     printf("%02X ", ecdh_key[i]);
   printf("\n");
