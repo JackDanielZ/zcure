@@ -3,9 +3,9 @@ Description=IP logger server
 After=zcure.service
 
 [Service]
-User=daniel
-WorkingDirectory=/home/daniel/
-ExecStart=/usr/bin/ip_logger_server
+User=$USER
+WorkingDirectory=$HOME
+ExecStart=$PREFIX/bin/ip_logger_server
 Restart=always
 
 [Install]

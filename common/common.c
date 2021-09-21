@@ -81,13 +81,22 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   const EC_POINT *pub_key;
   BIO *bio;
   char *key_file_data;
+  char *home;
   unsigned char *shared_secret;
   unsigned char *secret;
 
   unsigned int key_file_data_size = 0;
   unsigned int shared_secret_len;
 
-  key_file_data = get_file_content_as_string("/home/daniel/.config/zcure/local_key/mine.pem", &key_file_data_size);
+  home = getenv("HOME");
+  if (home == NULL)
+  {
+    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    return NULL;
+  }
+
+  sprintf(path, "%s/.config/zcure/local_key/mine.pem", home);
+  key_file_data = get_file_content_as_string(path, &key_file_data_size);
   if (!key_file_data || !key_file_data_size)
   {
     fprintf(stderr, "Failed to read private key\n");
@@ -101,7 +110,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
 
   priv_key = EVP_PKEY_get1_EC_KEY(key);
 
-  sprintf(path, "/home/daniel/.config/zcure/remote_keys/%s.pub", username);
+  sprintf(path, "%s/.config/zcure/remote_keys/%s.pub", home, username);
   key_file_data = get_file_content_as_string(path, &key_file_data_size);
   if (!key_file_data || !key_file_data_size)
   {

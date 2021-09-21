@@ -8,7 +8,7 @@ LDFLAGS := -L$(BUILD) -L/usr/lib -lssl -lcrypto -lcurl -ljson-c
 
 PREFIX ?= /usr
 
-all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_server $(BUILD)/libzcure_server.so $(BUILD)/zcure_server_example $(BUILD)/ip_logger_client $(BUILD)/ip_logger_server
+all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_server $(BUILD)/libzcure_server.so $(BUILD)/zcure_server_example $(BUILD)/ip_logger_client $(BUILD)/ip_logger_server $(BUILD)/zcure.service $(BUILD)/ip_logger.service
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
@@ -39,6 +39,12 @@ $(BUILD)/ip_logger_server: LDFLAGS += -lzcure_server
 $(BUILD)/ip_logger_server: $(BUILD)/bin/ip_logger/server_app.o $(BUILD)/libzcure_server.so
 	gcc $< -o $@ $(CFLAGS) $(LDFLAGS)
 
+$(BUILD)/zcure.service: service/zcure.service
+	PREFIX=${PREFIX} envsubst < $^ > $@
+
+$(BUILD)/ip_logger.service: service/ip_logger.service
+	PREFIX=${PREFIX} envsubst < $^ > $@
+
 install:
 	mkdir -p $(PREFIX)/lib/
 	mkdir -p $(PREFIX)/bin/
@@ -46,8 +52,8 @@ install:
 	install $(BUILD)/libzcure_server.so $(PREFIX)/lib/
 	install $(BUILD)/zcure_server $(PREFIX)/bin/
 	install $(BUILD)/ip_logger_* $(PREFIX)/bin/
-	install -m 644 service/zcure.service /etc/systemd/system/
-	install -m 644 service/ip_logger.service /etc/systemd/system/
+	install -m 644 $(BUILD)/zcure.service /etc/systemd/system/
+	install -m 644 $(BUILD)/ip_logger.service /etc/systemd/system/
 
 clean:
 	rm -rf $(BUILD)/*

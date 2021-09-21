@@ -48,11 +48,19 @@ int main(void)
   int zcure_fd;
   int nb;
   int fd;
+  char *home = NULL;
   char *config_json_content = NULL;
   const char *trigger_host = NULL;
   const char *namecheap_domain = NULL;
   const char *namecheap_name = NULL;
   const char *namecheap_key = NULL;
+
+  home = getenv("HOME");
+  if (home == NULL)
+  {
+    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    return 1;
+  }
 
   zcure_fd = zcure_server_register("IP_Logger");
   if (zcure_fd <= 0)
@@ -61,12 +69,13 @@ int main(void)
     return 1;
   }
 
-  if (stat("/home/daniel/IPs", &st) == -1)
+  sprintf(path, "%s/IPs", home);
+  if (stat(path, &st) == -1)
   {
-    mkdir("/home/daniel/IPs", 0700);
+    mkdir(path, 0700);
   }
 
-  sprintf(path, "/home/daniel/.config/ip_logger/config.json");
+  sprintf(path, "%s/.config/ip_logger/config.json", home);
   config_json_content = get_file_content_as_string(path, NULL);
 
   if (config_json_content)
@@ -83,6 +92,7 @@ int main(void)
       namecheap_name = STRING_GET(JSON_GET(config_obj, "namecheap_name"));
     }
   }
+
   do
   {
     Client_Info client;
@@ -101,7 +111,7 @@ int main(void)
           );
       printf("%d bytes received from client %d - Name %s IP %s\n", nb, client.id, client.name, cur_ip);
 
-      sprintf(path, "/home/daniel/IPs/%s.last", client.name);
+      sprintf(path, "%s/IPs/%s.last", home, client.name);
       last_ip = get_file_content_as_string(path, NULL);
 
       if (!last_ip || strcmp((char *)last_ip, cur_ip) != 0)
@@ -118,7 +128,7 @@ int main(void)
           close(fd);
         }
 
-        sprintf(path, "/home/daniel/IPs/%s.log", client.name);
+        sprintf(path, "%s/IPs/%s.log", home, client.name);
         fd = open(path, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
 
         if (fd <= 0)
