@@ -172,10 +172,10 @@ zcure_client_connect(const char *server, const char *port, const char *username,
     return -1;
   }
 
-  rv = zcure_gcm_decrypt(ecdh_key, iv0, sizeof(iv0),
-                         NULL, 0,
-                         &conn_rsp, sizeof(conn_rsp) - sizeof(conn_rsp.tag),
-                         &conn_rsp,
+  rv = zcure_gcm_decrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
+                         conn_rsp.iv, sizeof(conn_rsp.iv),
+                         &(conn_rsp.status), sizeof(conn_rsp.status) + sizeof(conn_rsp.aes_gcm_key),
+                         &(conn_rsp.status),
                          conn_rsp.tag, sizeof(conn_rsp.tag));
   if (rv != 0)
   {
@@ -186,7 +186,6 @@ zcure_client_connect(const char *server, const char *port, const char *username,
   struct Connection *c = calloc(1, sizeof(*c));
   c->fd = fd;
   memcpy(c->aes_gcm_key, conn_rsp.aes_gcm_key, sizeof(c->aes_gcm_key));
-  memcpy(c->aes_gcm_iv, conn_rsp.aes_gcm_iv, sizeof(c->aes_gcm_iv));
 
   c->cid = fd;
   c->next = _connections;
@@ -221,9 +220,10 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
 
   c_info = (Client_Data_Info *)cipher_buffer;
   c_info->size = plain_size;
+  zcure_data_randomize(sizeof(c_info->iv), c_info->iv);
 
-  rv = zcure_gcm_encrypt(c->aes_gcm_key, c->aes_gcm_iv, sizeof(c->aes_gcm_iv),
-                         c_info, sizeof(c_info->size),
+  rv = zcure_gcm_encrypt(c->aes_gcm_key, c_info->iv, sizeof(c_info->iv),
+                         c_info, sizeof(c_info->size) + sizeof(c_info->iv),
                          plain_buffer, plain_size,
                          cipher_buffer + sizeof(Client_Data_Info),
                          c_info->tag, sizeof(c_info->tag));
@@ -274,7 +274,7 @@ int zcure_client_receive(int cid, void **plain_buffer)
     return -1;
   }
 
-  rv = zcure_gcm_decrypt(c->aes_gcm_key, c->aes_gcm_iv, sizeof(c->aes_gcm_iv),
+  rv = zcure_gcm_decrypt(c->aes_gcm_key, c_info.iv, sizeof(c_info.iv),
                          &c_info, sizeof(c_info.size),
                          cipher_buffer, c_info.size,
                          cipher_buffer,

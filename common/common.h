@@ -15,16 +15,16 @@
   printf("\n");
 
 /*
-Alice: calculate ECDH(Alice, Bob) -> key
-Alice->Bob: gcm_encrypt(key, {"Alice", service}, tag)
-Bob:
-- Extract username
+Client: generate salt and calculate ECDH(client, server, salt) -> key
+Client->server: gcm_encrypt(key, {"Alice", service}, tag)
+Server:
+- Extract username and salt
 - Look for user public key
-- Calculate ECDH(Alice, Bob) -> key
-- gcm_decrypt(key and validate tag
-- Generate cbc_key and cbc_iv
-Bob->Alice: gcm_encrypt(key, {NULL, cbc_key, cbc_size}, tag)
-Alice:
+- Calculate ECDH(client, server, salt) -> key
+- gcm_decrypt(key) and validate tag
+- Generate gcm_key and gcm_iv
+Server->client: gcm_encrypt(key, {NULL, gcm_key, gcm_size}, tag)
+Client:
 - gcm_decrypt(key) and validate tag
 - Extract key and iv
 */
@@ -43,19 +43,20 @@ typedef struct
 
 /*
  * Challenge response + AES key sent by the server to the client
- * Encrypted with ECDH(client public key, server private key) stored into the server database
+ * Encrypted with ECDH(client public key, server private key, salt), public key stored into the server database
  */
 typedef struct
 {
+  uint8_t iv[AES_BLOCK_SIZE];
   uint8_t status;
   uint8_t aes_gcm_key[32];
-  uint8_t aes_gcm_iv[AES_BLOCK_SIZE];
   uint8_t tag[16];
 } ClientConnectionResponse;
 
 typedef struct
 {
   uint32_t size;
+  uint8_t iv[AES_BLOCK_SIZE];
   uint8_t tag[16];
 } Client_Data_Info;
 

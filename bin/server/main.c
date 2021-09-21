@@ -54,7 +54,6 @@ struct _Connection
       uint32_t ip;
 
       unsigned char aes_gcm_key[32];
-      unsigned char aes_gcm_iv[AES_BLOCK_SIZE];
     };
   };
 
@@ -288,6 +287,7 @@ _handle_server(Connection *conn)
       data = malloc(sizeof(Client_Data_Info) + s_info.size);
       c_info = (Client_Data_Info *)data;
       c_info->size = s_info.size;
+      zcure_data_randomize(sizeof(c_info->iv), c_info->iv);
 
       rv = recv(conn->fd, data + sizeof(Client_Data_Info), c_info->size, 0);
       if (rv <= 0)
@@ -300,8 +300,8 @@ _handle_server(Connection *conn)
        * Data to authenticate: size + data
        * Data to decrypt: data
        */
-      rv = zcure_gcm_encrypt(client->aes_gcm_key, client->aes_gcm_iv, sizeof(client->aes_gcm_iv),
-                             data, sizeof(c_info->size),
+      rv = zcure_gcm_encrypt(client->aes_gcm_key, c_info->iv, sizeof(c_info->iv),
+                             data, sizeof(c_info->size) + sizeof(c_info->iv),
                              data + sizeof(Client_Data_Info), c_info->size,
                              data + sizeof(Client_Data_Info),
                              c_info->tag, sizeof(c_info->tag));
@@ -381,16 +381,15 @@ _handle_client(Connection *conn)
 
       /* Store AES info */
       memcpy(conn->aes_gcm_key, conn_rsp.aes_gcm_key, sizeof(conn_rsp.aes_gcm_key));
-      memcpy(conn->aes_gcm_iv, conn_rsp.aes_gcm_iv, sizeof(conn_rsp.aes_gcm_iv));
       conn_rsp.status = 0;
 
       /*
        * Data to encrypt: response - tag
        */
-      rv = zcure_gcm_encrypt(ecdh_key, iv0, sizeof(iv0),
-                             NULL, 0,
-                             &conn_rsp, sizeof(conn_rsp) - sizeof(conn_rsp.tag),
-                             &conn_rsp,
+      rv = zcure_gcm_encrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
+                             conn_rsp.iv, sizeof(conn_rsp.iv),
+                             &(conn_rsp.status), sizeof(conn_rsp.status) + sizeof(conn_rsp.aes_gcm_key),
+                             &(conn_rsp.status),
                              conn_rsp.tag, sizeof(conn_rsp.tag));
       if (rv != 0)
       {
@@ -443,8 +442,8 @@ _handle_client(Connection *conn)
        * Data to authenticate: size + data
        * Data to decrypt: data
        */
-      rv = zcure_gcm_decrypt(conn->aes_gcm_key, conn->aes_gcm_iv, sizeof(conn->aes_gcm_iv),
-                             &c_info, sizeof(c_info.size),
+      rv = zcure_gcm_decrypt(conn->aes_gcm_key, c_info.iv, sizeof(c_info.iv),
+                             &c_info, sizeof(c_info.size) + sizeof(c_info.iv),
                              data + sizeof(Server2ServerApp_Data_Info), c_info.size,
                              data + sizeof(Server2ServerApp_Data_Info),
                              c_info.tag, sizeof(c_info.tag));
