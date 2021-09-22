@@ -117,7 +117,7 @@ int main(void)
       if (!last_ip || strcmp((char *)last_ip, cur_ip) != 0)
       {
         printf("Update needed\n");
-        fd = open(path, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
         if (fd <= 0)
         {
           perror("Cannot open IP last file");
