@@ -356,6 +356,11 @@ _handle_client(Connection *conn)
       }
 
       ecdh_key = zcure_ecdh_key_compute_for_username(conn_req.username, conn_req.salt, sizeof(conn_req.salt), secret_len);
+      if (ecdh_key == NULL)
+      {
+        fprintf(stderr, "Failed to compute ECDH key\n");
+        return -1;
+      }
 
       for (int i = 0; i < secret_len; i++)
         printf("%02X ", ecdh_key[i]);
