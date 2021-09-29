@@ -144,7 +144,7 @@ _server_create(const char *port)
   s = getaddrinfo(NULL, port, &hints, &result);
   if (s != 0)
   {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+    LOGGER_ERROR("getaddrinfo: %s", gai_strerror(s));
     return -1;
   }
 
@@ -168,7 +168,7 @@ _server_create(const char *port)
     close(sfd);
   }
 
-  fprintf(stderr, "Could not bind\n");
+  LOGGER_ERROR("Could not bind");
   sfd = -1;
 
 exit:
@@ -238,6 +238,7 @@ _handle_server(Connection *conn)
       /* Check the service is a NULL terminated string */
       if (memchr(service, '\0', sizeof(service)) == NULL)
       {
+        LOGGER_ERROR("Service name for socket %d too long", conn->fd);
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
@@ -246,6 +247,7 @@ _handle_server(Connection *conn)
       server_conn = _server_find_by_name(service);
       if (server_conn && server_conn->fd != 0)
       {
+        LOGGER_ERROR("Service %s already registered", service);
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
@@ -253,7 +255,7 @@ _handle_server(Connection *conn)
       conn->name = strdup(service);
       conn->state = STATE_OPERATIONAL;
 
-      printf("Service %s registered\n", service);
+      LOGGER_INFO("Service %s registered", service);
 
       send(conn->fd, &(int){0}, sizeof(int), 0);
       break;
@@ -277,7 +279,7 @@ _handle_server(Connection *conn)
       client = _client_find_by_id(s_info.client_id);
       if (client == NULL)
       {
-        fprintf(stderr, "Client with id %d not found\n", s_info.client_id);
+        LOGGER_ERROR("Client with id %d not found", s_info.client_id);
         /* Positive return code to not close the server connection when a client disconnected suddenly */
         return 1;
       }
@@ -307,7 +309,7 @@ _handle_server(Connection *conn)
                              c_info->tag, sizeof(c_info->tag));
       if (rv != 0)
       {
-        fprintf(stderr, "zcure_gcm_encrypt to client failed\n");
+        LOGGER_ERROR("zcure_gcm_encrypt data from service %s to client %s failed", conn->name, client->name);
         return -1;
       }
 
@@ -352,19 +354,16 @@ _handle_client(Connection *conn)
       /* Check the username is a NULL terminated string */
       if (memchr(conn_req.username, '\0', sizeof(conn_req.username)) == NULL)
       {
+        LOGGER_ERROR("Invalid username in request from client");
         return -1;
       }
 
       ecdh_key = zcure_ecdh_key_compute_for_username(conn_req.username, conn_req.salt, sizeof(conn_req.salt), secret_len);
       if (ecdh_key == NULL)
       {
-        fprintf(stderr, "Failed to compute ECDH key\n");
+        LOGGER_ERROR("Failed to compute ECDH key for client %s", conn_req.username);
         return -1;
       }
-
-      for (int i = 0; i < secret_len; i++)
-        printf("%02X ", ecdh_key[i]);
-      printf("\n");
 
       /*
        * Data to authenticate: username + salt + service
@@ -377,7 +376,7 @@ _handle_client(Connection *conn)
                              conn_req.tag, sizeof(conn_req.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "GCM Decryption of ClientConnectionRequest failed\n");
+        LOGGER_ERROR("GCM Decryption of ClientConnectionRequest from client %s failed", conn_req.username);
         return -1;
       }
 
@@ -398,7 +397,7 @@ _handle_client(Connection *conn)
                              conn_rsp.tag, sizeof(conn_rsp.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "GCM Encryption of ClientConnectionResponse failed\n");
+        LOGGER_ERROR("GCM Decryption of ClientConnectionResponse to client %s failed", conn_req.username);
         return -1;
       }
 
@@ -406,6 +405,7 @@ _handle_client(Connection *conn)
       conn->name = strdup(conn_req.username);
       conn->service = _server_find_by_name(conn_req.service);
 
+      LOGGER_INFO("Connection from client %s (%d) to service %s", conn->name, conn->id, conn_req.service);
       memset(ecdh_key, '0', secret_len);
       free(ecdh_key);
 
@@ -454,7 +454,7 @@ _handle_client(Connection *conn)
                              c_info.tag, sizeof(c_info.tag));
       if (rv != 0)
       {
-        fprintf(stderr, "zcure_gcm_decrypt from client failed\n");
+        LOGGER_ERROR("zcure_gcm_decrypt from client %s failed", conn->name);
         return -1;
       }
 
@@ -464,7 +464,7 @@ _handle_client(Connection *conn)
       }
       else
       {
-        fprintf(stderr, "No server for the client %d\n", conn->id);
+        LOGGER_ERROR("No server for the client %s", conn->name);
         rv = -1;
       }
 
@@ -495,6 +495,8 @@ int main(int argc, char **argv)
   int rv = EXIT_FAILURE;
   struct epoll_event event = {0}, events[MAX_EVENTS];
 
+  LOGGER_INFO("START");
+
   while (1)
   {
     /* getopt_long stores the option index here. */
@@ -520,6 +522,7 @@ int main(int argc, char **argv)
 
   if (!_port)
   {
+    LOGGER_ERROR("Port not provided");
     _help(argv[0]);
     return EXIT_FAILURE;
   }
@@ -527,14 +530,14 @@ int main(int argc, char **argv)
   epoll_fd = epoll_create1(0);
   if (epoll_fd == -1)
   {
-    fprintf(stderr, "Failed to create epoll file descriptor\n");
+    LOGGER_ERROR("Failed to create epoll file descriptor");
     return EXIT_FAILURE;
   }
 
   master_fd = _server_create(_port);
   if (master_fd == -1)
   {
-    fprintf(stderr, "Cannot create a server on port %s\n", _port);
+    LOGGER_ERROR("Cannot create a server on port %s", _port);
     return EXIT_FAILURE;
   }
 
@@ -550,7 +553,7 @@ int main(int argc, char **argv)
   local_fd = _create_local_socket("#zcure_server");
   if (local_fd == -1)
   {
-    fprintf(stderr, "Cannot create a local socket\n");
+    LOGGER_ERROR("Cannot create a local socket");
     return EXIT_FAILURE;
   }
 
@@ -562,6 +565,8 @@ int main(int argc, char **argv)
     perror("epoll_ctl");
     goto exit;
   }
+
+  LOGGER_INFO("INIT DONE");
 
   while(1)
   {
@@ -579,7 +584,7 @@ int main(int argc, char **argv)
         new_fd = accept(master_fd, (struct sockaddr *)&in_addr, &in_len);
         if (new_fd == -1)
         {
-          perror("accept tcp");
+          LOGGER_ERROR("remote accept failed: %s", strerror(errno));
           return EXIT_FAILURE;
         }
 
@@ -598,11 +603,11 @@ int main(int argc, char **argv)
         event.events = EPOLLIN | EPOLLET;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
-          perror("epoll_ctl");
+          LOGGER_ERROR("remote epoll_ctl failed: %s", strerror(errno));
           return EXIT_FAILURE;
         }
 
-        printf("New client %d\n", conn->id);
+        LOGGER_INFO("Connection from client %d", conn->id);
       }
       else if (events[i].data.fd == local_fd)
       {
@@ -614,7 +619,7 @@ int main(int argc, char **argv)
         new_fd = accept(local_fd, &in_addr, &in_len);
         if (new_fd == -1)
         {
-          perror("accept local");
+          LOGGER_ERROR("local accept failed: %s", strerror(errno));
           return EXIT_FAILURE;
         }
 
@@ -631,9 +636,11 @@ int main(int argc, char **argv)
         event.events = EPOLLIN | EPOLLET;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
-          perror("epoll_ctl");
+          LOGGER_ERROR("local epoll_ctl failed: %s", strerror(errno));
           return EXIT_FAILURE;
         }
+
+        LOGGER_INFO("Connection from server");
       }
       else
       {
@@ -652,6 +659,7 @@ int main(int argc, char **argv)
               /* Data coming from a server application */
               if (_handle_server(conn) <= 0)
               {
+                LOGGER_INFO("Closing connection with server: Name=%s fd=%d", conn->name ? conn->name : "none", conn->fd);
                 close(conn->fd);
               }
             }
@@ -660,6 +668,7 @@ int main(int argc, char **argv)
               /* Data coming from a client */
               if (_handle_client(conn) <= 0)
               {
+                LOGGER_INFO("Closing connection with client: Name=%s id=%d fd=%d", conn->name ? conn->name : "none", conn->id, conn->fd);
                 close(conn->fd);
               }
             }

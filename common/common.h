@@ -93,4 +93,29 @@ zcure_gcm_decrypt(const unsigned char *key,
                   const void *tag_buf,
                   unsigned int tag_len);
 
+/* Logger APIs */
+
+extern char *__progname;
+
+#define LOGGER_PRINT(type, fmt, ...) \
+  do { \
+    FILE *logger_fp; \
+    char path[256]; \
+    time_t current_time = time(NULL); \
+    char *timetext = asctime(localtime(&current_time)); \
+    \
+    timetext[strlen(timetext) - 1] = '\0'; \
+    sprintf(path, "%s/%s.log", getenv("HOME"), __progname); \
+    logger_fp = fopen(path, "a"); \
+    if (logger_fp != NULL) \
+    { \
+      fprintf(logger_fp, "%s <%s> " fmt "\n", timetext, type, ## __VA_ARGS__); \
+      fflush(logger_fp); \
+      fclose(logger_fp); \
+    } \
+  } while (0);
+
+#define LOGGER_INFO(fmt, ...) LOGGER_PRINT("INFO", fmt, ## __VA_ARGS__);
+#define LOGGER_ERROR(fmt, ...) LOGGER_PRINT("ERROR", fmt, ## __VA_ARGS__);
+
 #endif /* __ZCURE_COMMON_H__ */
