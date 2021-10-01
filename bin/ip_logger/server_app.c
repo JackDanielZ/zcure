@@ -17,6 +17,14 @@
    ((obj && json_object_get_type(obj) == json_type_string) ? \
    json_object_get_string(obj) : NULL)
 
+typedef struct
+{
+  const char *name;
+  uint32_t ip;
+} IP_Info;
+
+static IP_Info _infos[100] = {0};
+
 static json_object *
 _json_get(json_object *obj, ...)
 {
@@ -44,16 +52,16 @@ _json_get(json_object *obj, ...)
 int main(void)
 {
   char path[256];
-  struct stat st = {0};
   int zcure_fd;
   int nb;
-  int fd;
   char *home = NULL;
   char *config_json_content = NULL;
   const char *trigger_host = NULL;
   const char *namecheap_domain = NULL;
   const char *namecheap_name = NULL;
   const char *namecheap_key = NULL;
+
+  LOGGER_INFO("START");
 
   home = getenv("HOME");
   if (home == NULL)
@@ -67,12 +75,6 @@ int main(void)
   {
     fprintf(stderr, "Cannot connect\n");
     return 1;
-  }
-
-  sprintf(path, "%s/IPs", home);
-  if (stat(path, &st) == -1)
-  {
-    mkdir(path, 0700);
   }
 
   sprintf(path, "%s/.config/ip_logger/config.json", home);
@@ -93,6 +95,8 @@ int main(void)
     }
   }
 
+  LOGGER_INFO("INIT DONE");
+
   do
   {
     Client_Info client;
@@ -100,68 +104,49 @@ int main(void)
     nb = zcure_server_receive(zcure_fd, (void **)&buf, &client);
     if (nb > 0)
     {
-      char *last_ip = NULL;
-      char cur_ip[16];
+      unsigned int i;
 
-      sprintf(cur_ip, "%d.%d.%d.%d",
-          client.ip & 0xFF,
-          (client.ip >> 8) & 0xFF,
-          (client.ip >> 16) & 0xFF,
-          client.ip >> 24
-          );
-      printf("%d bytes received from client %d - Name %s IP %s\n", nb, client.id, client.name, cur_ip);
-
-      sprintf(path, "%s/IPs/%s.last", home, client.name);
-      last_ip = get_file_content_as_string(path, NULL);
-
-      if (!last_ip || strcmp((char *)last_ip, cur_ip) != 0)
+      for (i = 0; i < sizeof(_infos) / sizeof(IP_Info); i++)
       {
-        printf("Update needed\n");
-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-        if (fd <= 0)
+        if (_infos[i].name == NULL) break;
+        if (!strcmp(_infos[i].name, client.name)) break;
+      }
+
+      if (i == sizeof(_infos) / sizeof(IP_Info))
+      {
+        LOGGER_ERROR("Too many clients!!!!");
+      }
+      else
+      {
+        if (_infos[i].name == NULL)
         {
-          perror("Cannot open IP last file");
-        }
-        else
-        {
-          write(fd, cur_ip, strlen(cur_ip));
-          close(fd);
+          _infos[i].name = strdup(client.name);
+          _infos[i].ip = 0;
         }
 
-        sprintf(path, "%s/IPs/%s.log", home, client.name);
-        fd = open(path, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
+        if (client.ip != _infos[i].ip)
+        {
+          _infos[i].ip = client.ip;
+          LOGGER_INFO("New IP for %s: %d.%d.%d.%d",
+              client.name,
+              client.ip & 0xFF, (client.ip >> 8) & 0xFF, (client.ip >> 16) & 0xFF, client.ip >> 24);
 
-        if (fd <= 0)
-        {
-          perror("Cannot open IP log file");
-        }
-        else
-        {
-          time_t current_time = time(NULL);
-          struct tm *tm = localtime(&current_time);
-          dprintf(fd, "%02d/%02d/%04d %02d:%02d:%02d - %s\n",
-              tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900,
-              tm->tm_hour, tm->tm_min, tm->tm_sec,
-              cur_ip);
-          close(fd);
-        }
-
-        if (trigger_host && !strcmp(client.name, trigger_host))
-        {
-          char cmd[512];
-          sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%s\" > /dev/null 2>&1",
-              namecheap_domain, namecheap_name, namecheap_key, cur_ip);
-          printf(cmd);
-          system(cmd);
+          if (trigger_host && !strcmp(client.name, trigger_host))
+          {
+            char cmd[512];
+            sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%d.%d.%d.%d\" > /dev/null 2>&1",
+                namecheap_domain, namecheap_name, namecheap_key,
+                client.ip & 0xFF, (client.ip >> 8) & 0xFF, (client.ip >> 16) & 0xFF, client.ip >> 24);
+            printf(cmd);
+            system(cmd);
+          }
         }
       }
-      free(last_ip);
-
       free(buf);
     }
     else
     {
-      fprintf(stderr, "Disconnection from server\n");
+      LOGGER_ERROR("Disconnection from server");
     }
   }
   while (nb > 0);
