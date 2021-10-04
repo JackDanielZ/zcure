@@ -12,7 +12,7 @@ all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_se
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
-	gcc -c $^ $(CFLAGS) -o $@
+	gcc -MMD -c $< $(CFLAGS) -o $@
 
 $(BUILD)/libzcure_client.so: $(BUILD)/lib/client/client.o $(BUILD)/common/common.o
 	gcc -shared -o $@ $^ -lssl -lcrypto
@@ -57,3 +57,7 @@ install:
 
 clean:
 	rm -rf $(BUILD)/*
+
+rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
+
+-include $(call rwildcard, $(BUILD), *.d)
