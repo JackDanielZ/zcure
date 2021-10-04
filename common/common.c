@@ -17,6 +17,8 @@
 
 #include "common/common.h"
 
+unsigned int logger_first_call = 1;
+
 char *
 get_file_content_as_string(const char *filename, unsigned int *size)
 {

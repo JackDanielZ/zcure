@@ -2,6 +2,7 @@
 #define __ZCURE_COMMON_H__
 
 #include <stdint.h>
+#include <sys/stat.h>
 
 #define AES_BLOCK_SIZE 16
 
@@ -96,6 +97,7 @@ zcure_gcm_decrypt(const unsigned char *key,
 /* Logger APIs */
 
 extern char *__progname;
+extern unsigned int logger_first_call;
 
 #define LOGGER_PRINT(type, fmt, ...) \
   do { \
@@ -105,7 +107,15 @@ extern char *__progname;
     char *timetext = asctime(localtime(&current_time)); \
     \
     timetext[strlen(timetext) - 1] = '\0'; \
-    sprintf(path, "%s/%s.log", getenv("HOME"), __progname); \
+    if (logger_first_call == 1) \
+    { \
+      sprintf(path, "%s/.zcure", getenv("HOME")); \
+      mkdir(path, S_IRWXU); \
+      sprintf(path, "%s/.zcure/logs", getenv("HOME")); \
+      mkdir(path, S_IRWXU); \
+    } \
+    logger_first_call = 0; \
+    sprintf(path, "%s/.zcure/logs/%s.log", getenv("HOME"), __progname); \
     logger_fp = fopen(path, "a"); \
     if (logger_fp != NULL) \
     { \
