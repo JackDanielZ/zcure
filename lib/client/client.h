@@ -4,7 +4,7 @@
 int zcure_client_init(void);
 int zcure_client_shutdown(void);
 
-int zcure_client_connect(const char *server, const char *port, const char *username, const char *service);
+int zcure_client_connect(const char *destination, const char *service);
 
 int zcure_client_disconnect(int cid);
 

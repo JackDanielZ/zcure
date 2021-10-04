@@ -111,7 +111,7 @@ exit:
 }
 
 int
-zcure_client_connect(const char *server, const char *port, const char *username, const char *service)
+zcure_client_connect(const char *destination, const char *service)
 {
   int fd;
   unsigned char *ecdh_key = NULL;
@@ -121,8 +121,30 @@ zcure_client_connect(const char *server, const char *port, const char *username,
   unsigned char iv0[12] = {0};
   int size;
   int rv;
+  char *username = NULL;
+  char *server = NULL;
+  const char *port = NULL;
+  const char *tmp = NULL;
 
-  if (!server || !port) return -1;
+  tmp = strchr(destination, '@');
+  if (tmp == NULL)
+  {
+    fprintf(stderr, "Expected '@', destination format: user@server:port\n");
+    return -1;
+  }
+
+  username = strndup(destination, tmp - destination);
+  destination = tmp + 1;
+
+  tmp = strchr(destination, ':');
+  if (tmp == NULL)
+  {
+    fprintf(stderr, "Expected ':', destination format: user@server:port\n");
+    return -1;
+  }
+
+  server = strndup(destination, tmp - destination);
+  port = tmp + 1;
 
   fd = _tcp_connect(server, port);
 
