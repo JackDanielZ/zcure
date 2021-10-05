@@ -238,7 +238,7 @@ _handle_server(Connection *conn)
       /* Check the service is a NULL terminated string */
       if (memchr(service, '\0', sizeof(service)) == NULL)
       {
-        LOGGER_ERROR("Service name for socket %d too long", conn->fd);
+        LOGGER_ERROR("Service name %.*s... for socket %d too long", (int)sizeof(service), service, conn->fd);
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
@@ -380,6 +380,16 @@ _handle_client(Connection *conn)
         return -1;
       }
 
+      /* Force the service to be a NULL terminated string */
+      conn_req.service[sizeof(conn_req.service) - 1] = '\0';
+
+      conn->service = _server_find_by_name(conn_req.service);
+      if (!conn->service)
+      {
+        LOGGER_ERROR("Service in request from client unknown: %s", conn_req.service);
+        return -1;
+      }
+
       /* Prepare connection response */
       zcure_data_randomize(sizeof(conn_rsp), &conn_rsp);
 
@@ -397,13 +407,12 @@ _handle_client(Connection *conn)
                              conn_rsp.tag, sizeof(conn_rsp.tag));
       if (rv != 0)
       {
-        LOGGER_ERROR("GCM Decryption of ClientConnectionResponse to client %s failed", conn_req.username);
+        LOGGER_ERROR("GCM Encryption of ClientConnectionResponse to client %s failed", conn_req.username);
         return -1;
       }
 
       conn->state = STATE_OPERATIONAL;
       conn->name = strdup(conn_req.username);
-      conn->service = _server_find_by_name(conn_req.service);
 
       LOGGER_INFO("Connection from client %s (%d) to service %s", conn->name, conn->id, conn_req.service);
       memset(ecdh_key, '0', secret_len);
