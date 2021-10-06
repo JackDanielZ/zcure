@@ -31,6 +31,12 @@ typedef enum
   STATE_OPERATIONAL
 } Connection_State;
 
+typedef struct
+{
+  char *name;
+  char *allowed_clients;
+} Service_Permission;
+
 struct _Connection
 {
   unsigned int is_server;
@@ -69,6 +75,8 @@ static unsigned int _last_id = 0;
 
 static const char *_port = NULL;
 
+static Service_Permission *services_permissions = NULL;
+
 static Connection *
 _server_find_by_name(const char *name)
 {
@@ -100,6 +108,132 @@ _connection_free(Connection *conn)
   if (conn->next) conn->next->prev = conn->prev;
   if (_connections == conn) _connections = conn->next;
   free(conn);
+}
+
+static int
+_permissions_parse(void)
+{
+  int rc = 1;
+  char path[256];
+  char *permissions_file_content = NULL;
+  char *home = getenv("HOME");
+  char *cur, *tmp;
+  Service_Permission *sp;
+  unsigned int nb_lines, no_line;
+
+  /* Clean the permissions table to handle the on-purpose file deletion */
+  sp = services_permissions;
+  while (sp && sp->name)
+  {
+    free(sp->name);
+    free(sp->allowed_clients);
+    sp++;
+  }
+  free(services_permissions);
+  services_permissions = NULL;
+
+  if (home == NULL)
+  {
+    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    goto exit;
+  }
+
+  sprintf(path, "%s/.config/zcure/permissions.conf", home);
+  permissions_file_content = get_file_content_as_string(path, NULL);
+  if (!permissions_file_content)
+  {
+    LOGGER_ERROR("Cannot read %s", path);
+    goto exit;
+  }
+
+  tmp = permissions_file_content;
+  nb_lines = 0;
+
+  while (tmp != NULL)
+  {
+    tmp = strchr(tmp, '\n');
+    if (tmp) tmp++;
+    nb_lines++;
+  }
+
+  services_permissions = calloc(nb_lines + 1, sizeof(Service_Permission));
+  cur = permissions_file_content;
+  sp = services_permissions;
+  no_line = 1;
+
+  while (*cur != '\0')
+  {
+    while (*cur == ' ' || *cur == '\t') cur++;
+
+    /* Isolate the current line of the next lines */
+    char *endl = strchr(cur, '\n');
+    if (endl)
+    {
+      *endl = '\0';
+    }
+
+    if (*cur != '\0')
+    {
+      /* Hide the comment #... */
+      tmp = strchr(cur, '#');
+      if (tmp)
+      {
+        tmp--;
+        while (*tmp == ' ' || *tmp == '\t') tmp--;
+        tmp++;
+        *tmp = '\0';
+      }
+
+      /* Look for ':' */
+      tmp = strchr(cur, ':');
+      if (!tmp)
+      {
+        LOGGER_ERROR("Permission file parsing failed, line %d: expected ':'", no_line);
+        goto exit;
+      }
+
+      sp->name = strndup(cur, tmp - cur);
+
+      /* Move after the ':' */
+      cur = tmp + 1;
+
+      sp->allowed_clients = malloc(strlen(cur) + 2); /* Let room for a space at the end of the clients list and for the termination character */
+      memcpy(sp->allowed_clients, cur, strlen(cur));
+      sp->allowed_clients[strlen(cur)] = ' ';
+      sp->allowed_clients[strlen(cur) + 1] = '\0';
+
+      LOGGER_INFO("Permission for service %s: %s", sp->name, sp->allowed_clients);
+    }
+    cur = endl + 1;
+    sp++;
+    no_line++;
+  }
+
+  rc = 0;
+
+exit:
+  if (permissions_file_content) free(permissions_file_content);
+  return rc;
+}
+
+static int
+_is_service_allowed_for_client(const char *service, const char *user)
+{
+  Service_Permission *sp;
+
+  sp = services_permissions;
+  while (sp && sp->name)
+  {
+    if (!strcmp(sp->name, service))
+    {
+      if (strstr(sp->allowed_clients, ":all:") != NULL || strstr(sp->allowed_clients, user) != NULL)
+      {
+        return 1;
+      }
+    }
+    sp++;
+  }
+  return 0;
 }
 
 static int
@@ -390,6 +524,12 @@ _handle_client(Connection *conn)
         return -1;
       }
 
+      if (!_is_service_allowed_for_client(conn_req.service, conn_req.username))
+      {
+        LOGGER_ERROR("Client %s not allowed for service %s", conn_req.username, conn_req.service);
+        return -1;
+      }
+
       /* Prepare connection response */
       zcure_data_randomize(sizeof(conn_rsp), &conn_rsp);
 
@@ -500,6 +640,7 @@ _help(const char *prg_name)
 
 int main(int argc, char **argv)
 {
+  char *permissions_file_content = NULL;
   int master_fd = -1, local_fd = -1, epoll_fd = -1, event_count, i;
   int rv = EXIT_FAILURE;
   struct epoll_event event = {0}, events[MAX_EVENTS];
@@ -572,6 +713,12 @@ int main(int argc, char **argv)
   if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, local_fd, &event))
   {
     perror("epoll_ctl");
+    goto exit;
+  }
+
+  if (_permissions_parse() != 0)
+  {
+    LOGGER_ERROR("Failed to parse the permissions config file");
     goto exit;
   }
 
@@ -694,5 +841,6 @@ exit:
 
   if (local_fd != -1 && close(local_fd)) perror("close");
 
+  if (permissions_file_content) free(permissions_file_content);
   return rv;
 }
