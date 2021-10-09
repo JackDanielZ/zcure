@@ -59,7 +59,7 @@ typedef struct
   uint32_t size;
   uint8_t iv[AES_BLOCK_SIZE];
   uint8_t tag[16];
-} Client_Data_Info;
+} Client_Header;
 
 char *
 get_file_content_as_string(const char *filename, unsigned int *size);

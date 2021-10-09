@@ -52,6 +52,7 @@ struct _Connection
      * Client: username
      */
     const char *name;
+    uint32_t flags; // Server
     struct // client
     {
       struct _Connection *service; /* Connection to the server */
@@ -358,11 +359,11 @@ _handle_server(Connection *conn)
     case STATE_WAIT_FOR_CONNECTION_REQUEST:
     {
       Connection *server_conn;
-      char service[SERVICE_SIZE];
+      ServerConnectionRequest req;
 
-      memset(service, 0, sizeof(service));
+      memset(&req, 0, sizeof(req));
 
-      rv = recv(conn->fd, service, sizeof(service), 0);
+      rv = recv(conn->fd, &req, sizeof(req), 0);
       if (rv <= 0)
       {
         if (rv < 0) perror("recv");
@@ -370,26 +371,26 @@ _handle_server(Connection *conn)
       }
 
       /* Check the service is a NULL terminated string */
-      if (memchr(service, '\0', sizeof(service)) == NULL)
+      if (memchr(req.service, '\0', sizeof(req.service)) == NULL)
       {
-        LOGGER_ERROR("Service name %.*s... for socket %d too long", (int)sizeof(service), service, conn->fd);
+        LOGGER_ERROR("Service name %.*s... for socket %d too long", (int)sizeof(req.service), req.service, conn->fd);
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
 
       /* Check that no app is already connected to the requested service */
-      server_conn = _server_find_by_name(service);
+      server_conn = _server_find_by_name(req.service);
       if (server_conn && server_conn->fd != 0)
       {
-        LOGGER_ERROR("Service %s already registered", service);
+        LOGGER_ERROR("Service %s already registered", req.service);
         send(conn->fd, &(int){1}, sizeof(int), 0);
         return -1;
       }
 
-      conn->name = strdup(service);
+      conn->name = strdup(req.service);
       conn->state = STATE_OPERATIONAL;
 
-      LOGGER_INFO("Service %s registered", service);
+      LOGGER_INFO("Service %s registered", req.service);
 
       send(conn->fd, &(int){0}, sizeof(int), 0);
       break;
@@ -397,8 +398,8 @@ _handle_server(Connection *conn)
     case STATE_OPERATIONAL:
     {
       Connection *client;
-      ServerApp2Server_Data_Info s_info;
-      Client_Data_Info *c_info;
+      ServerApp2Server_Header s_info;
+      Client_Header *c_info;
       char *data;
 
       memset(&s_info, 0, sizeof(s_info));
@@ -406,26 +407,26 @@ _handle_server(Connection *conn)
       rv = recv(conn->fd, &s_info, sizeof(s_info), 0);
       if (rv <= 0 || rv != sizeof(s_info))
       {
-        if (rv < 0) perror("recv Server2ServerApp_Data_Info");
+        if (rv < 0) perror("recv Server2ServerApp_Header");
         return -1;
       }
 
-      client = _client_find_by_id(s_info.client_id);
+      client = _client_find_by_id(s_info.dest_id);
       if (client == NULL)
       {
-        LOGGER_ERROR("Client with id %d not found", s_info.client_id);
+        LOGGER_ERROR("Client with id %d not found", s_info.dest_id);
         /* Positive return code to not close the server connection when a client disconnected suddenly */
         return 1;
       }
 
       // FIXME: check size limitation
 
-      data = malloc(sizeof(Client_Data_Info) + s_info.size);
-      c_info = (Client_Data_Info *)data;
+      data = malloc(sizeof(Client_Header) + s_info.size);
+      c_info = (Client_Header *)data;
       c_info->size = s_info.size;
       zcure_data_randomize(sizeof(c_info->iv), c_info->iv);
 
-      rv = recv(conn->fd, data + sizeof(Client_Data_Info), c_info->size, 0);
+      rv = recv(conn->fd, data + sizeof(Client_Header), c_info->size, 0);
       if (rv <= 0)
       {
         if (rv < 0) perror("recv");
@@ -438,8 +439,8 @@ _handle_server(Connection *conn)
        */
       rv = zcure_gcm_encrypt(client->aes_gcm_key, c_info->iv, sizeof(c_info->iv),
                              data, sizeof(c_info->size) + sizeof(c_info->iv),
-                             data + sizeof(Client_Data_Info), c_info->size,
-                             data + sizeof(Client_Data_Info),
+                             data + sizeof(Client_Header), c_info->size,
+                             data + sizeof(Client_Header),
                              c_info->tag, sizeof(c_info->tag));
       if (rv != 0)
       {
@@ -447,7 +448,7 @@ _handle_server(Connection *conn)
         return -1;
       }
 
-      rv = send(client->fd, data, sizeof(Client_Data_Info) + c_info->size, 0);
+      rv = send(client->fd, data, sizeof(Client_Header) + c_info->size, 0);
 
       free(data);
 
@@ -470,12 +471,15 @@ _handle_client(Connection *conn)
   {
     case STATE_WAIT_FOR_CONNECTION_REQUEST:
     {
+      int nb_bytes;
       int data_size;
       unsigned char *ecdh_key = NULL;
       int secret_len = 32;
       unsigned char iv0[12] = {0};
       ClientConnectionRequest conn_req;
       ClientConnectionResponse conn_rsp;
+      Server2ServerApp_Header hdr;
+      Server2ServerApp_ClientConnectNotification notif;
 
       /* Receive the encrypted ClientConnectionRequest */
       data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), 0);
@@ -559,33 +563,44 @@ _handle_client(Connection *conn)
       free(ecdh_key);
 
       /* Send the encrypted ClientConnectionResponse */
-      return send(conn->fd, &conn_rsp, sizeof(conn_rsp), 0);
+      nb_bytes = send(conn->fd, &conn_rsp, sizeof(conn_rsp), 0);
+
+      /* Notify the server about the new client connection */
+      hdr.size = sizeof(notif);
+      hdr.data_type = CLIENT_CONNECT_NOTIFICATION;
+      hdr.src_id = conn->id;
+      notif.ip = conn->ip;
+      strcpy(notif.name, conn->name);
+
+      send(conn->service->fd, &hdr, sizeof(hdr), 0);
+      send(conn->service->fd, &notif, sizeof(notif), 0);
+
+      return nb_bytes;
     }
     case STATE_OPERATIONAL:
     {
-      Client_Data_Info c_info;
-      Server2ServerApp_Data_Info *s_info;
+      Client_Header c_info;
+      Server2ServerApp_Header *s_info;
       char *data;
 
       /* Receive the header */
-      rv = recv(conn->fd, &c_info, sizeof(Client_Data_Info), 0);
-      if (rv != sizeof(Client_Data_Info))
+      rv = recv(conn->fd, &c_info, sizeof(Client_Header), 0);
+      if (rv != sizeof(Client_Header))
       {
-        if (rv < 0) perror("recv Client_Data_Info");
+        if (rv < 0) perror("recv Client_Header");
         return -1;
       }
 
       // FIXME: check size limitation
 
-      data = malloc(sizeof(Server2ServerApp_Data_Info) + c_info.size);
-      memset(data, 0, sizeof(Server2ServerApp_Data_Info));
-      s_info = (Server2ServerApp_Data_Info *)data;
-      s_info->client.size = c_info.size;
-      s_info->client.id = conn->id;
-      strcpy(s_info->client.name, conn->name);
-      s_info->client.ip = conn->ip;
+      data = malloc(sizeof(Server2ServerApp_Header) + c_info.size);
+      memset(data, 0, sizeof(Server2ServerApp_Header));
+      s_info = (Server2ServerApp_Header *)data;
+      s_info->size = c_info.size;
+      s_info->src_id = conn->id;
+      s_info->data_type = CLIENT_DATA;
 
-      rv = recv(conn->fd, data + sizeof(Server2ServerApp_Data_Info), c_info.size, 0);
+      rv = recv(conn->fd, data + sizeof(Server2ServerApp_Header), c_info.size, 0);
       if (rv <= 0)
       {
         if (rv < 0) perror("recv");
@@ -598,8 +613,8 @@ _handle_client(Connection *conn)
        */
       rv = zcure_gcm_decrypt(conn->aes_gcm_key, c_info.iv, sizeof(c_info.iv),
                              &c_info, sizeof(c_info.size) + sizeof(c_info.iv),
-                             data + sizeof(Server2ServerApp_Data_Info), c_info.size,
-                             data + sizeof(Server2ServerApp_Data_Info),
+                             data + sizeof(Server2ServerApp_Header), c_info.size,
+                             data + sizeof(Server2ServerApp_Header),
                              c_info.tag, sizeof(c_info.tag));
       if (rv != 0)
       {
@@ -609,7 +624,7 @@ _handle_client(Connection *conn)
 
       if (conn->service)
       {
-        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Data_Info) + s_info->client.size, 0);
+        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + s_info->size, 0);
       }
       else
       {

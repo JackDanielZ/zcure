@@ -4,24 +4,38 @@
 #include <stdint.h>
 #include "common/common.h"
 
+typedef enum
+{
+  CLIENT_DATA                    =  0,
+  CLIENT_CONNECT_NOTIFICATION    = (1 << 0),
+  CLIENT_DISCONNECT_NOTIFICATION = (1 << 1)
+} Server2ServerApp_DataType;
+
+typedef struct
+{
+  char service[SERVICE_SIZE];
+} ServerConnectionRequest;
+
 typedef struct
 {
   uint32_t size;
-  uint32_t id;
+  uint32_t data_type; /* Server2ServerApp_DataType */
+  uint32_t src_id;
+  /* data is following */
+} Server2ServerApp_Header;
+
+typedef struct
+{
+  uint32_t size;
+  uint32_t dest_id;
+  /* data is following */
+} ServerApp2Server_Header;
+
+typedef struct
+{
   char name[USERNAME_SIZE];
   uint32_t ip;
-} Client_Info;
-
-typedef struct
-{
-  Client_Info client;
-} Server2ServerApp_Data_Info;
-
-typedef struct
-{
-  uint32_t size;
-  uint32_t client_id;
-} ServerApp2Server_Data_Info;
+} Server2ServerApp_ClientConnectNotification;
 
 int zcure_server_init(void);
 int zcure_server_shutdown(void);
@@ -30,6 +44,6 @@ int zcure_server_register(const char *service);
 
 int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsigned int plain_size);
 
-int zcure_server_receive(int fd, void **plain_buffer, Client_Info *client_info);
+int zcure_server_receive(int fd, void **plain_buffer, Server2ServerApp_DataType *type, uint32_t *src_id);
 
 #endif /* __ZCURE_SERVER_H__ */

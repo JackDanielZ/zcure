@@ -99,46 +99,50 @@ int main(void)
 
   do
   {
-    Client_Info client;
+    Server2ServerApp_DataType type;
     char *buf = NULL;
-    nb = zcure_server_receive(zcure_fd, (void **)&buf, &client);
+    nb = zcure_server_receive(zcure_fd, (void **)&buf, &type, NULL);
     if (nb > 0)
     {
-      unsigned int i;
+      if (type == CLIENT_CONNECT_NOTIFICATION)
+      {
+        unsigned int i;
+        Server2ServerApp_ClientConnectNotification *notif = (Server2ServerApp_ClientConnectNotification *)buf;
 
-      for (i = 0; i < sizeof(_infos) / sizeof(IP_Info); i++)
-      {
-        if (_infos[i].name == NULL) break;
-        if (!strcmp(_infos[i].name, client.name)) break;
-      }
-
-      if (i == sizeof(_infos) / sizeof(IP_Info))
-      {
-        LOGGER_ERROR("Too many clients!!!!");
-      }
-      else
-      {
-        if (_infos[i].name == NULL)
+        for (i = 0; i < sizeof(_infos) / sizeof(IP_Info); i++)
         {
-          _infos[i].name = strdup(client.name);
-          _infos[i].ip = 0;
+          if (_infos[i].name == NULL) break;
+          if (!strcmp(_infos[i].name, notif->name)) break;
         }
 
-        if (client.ip != _infos[i].ip)
+        if (i == sizeof(_infos) / sizeof(IP_Info))
         {
-          _infos[i].ip = client.ip;
-          LOGGER_INFO("New IP for %s: %d.%d.%d.%d",
-              client.name,
-              client.ip & 0xFF, (client.ip >> 8) & 0xFF, (client.ip >> 16) & 0xFF, client.ip >> 24);
-
-          if (trigger_host && !strcmp(client.name, trigger_host))
+          LOGGER_ERROR("Too many clients!!!!");
+        }
+        else
+        {
+          if (_infos[i].name == NULL)
           {
-            char cmd[512];
-            sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%d.%d.%d.%d\" > /dev/null 2>&1",
-                namecheap_domain, namecheap_name, namecheap_key,
-                client.ip & 0xFF, (client.ip >> 8) & 0xFF, (client.ip >> 16) & 0xFF, client.ip >> 24);
-            printf(cmd);
-            system(cmd);
+            _infos[i].name = strdup(notif->name);
+            _infos[i].ip = 0;
+          }
+
+          if (notif->ip != _infos[i].ip)
+          {
+            _infos[i].ip = notif->ip;
+            LOGGER_INFO("New IP for %s: %d.%d.%d.%d",
+                notif->name,
+                notif->ip & 0xFF, (notif->ip >> 8) & 0xFF, (notif->ip >> 16) & 0xFF, notif->ip >> 24);
+
+            if (trigger_host && !strcmp(notif->name, trigger_host))
+            {
+              char cmd[512];
+              sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%d.%d.%d.%d\" > /dev/null 2>&1",
+                  namecheap_domain, namecheap_name, namecheap_key,
+                  notif->ip & 0xFF, (notif->ip >> 8) & 0xFF, (notif->ip >> 16) & 0xFF, notif->ip >> 24);
+              printf(cmd);
+              system(cmd);
+            }
           }
         }
       }

@@ -232,22 +232,22 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
 {
   void *cipher_buffer = NULL;
   unsigned int nb_sent_bytes;
-  Client_Data_Info *c_info;
+  Client_Header *c_info;
   struct Connection *c = _connection_find_by_cid(cid);
   int rv;
 
   if (!c) return -1;
 
-  cipher_buffer = malloc(sizeof(Client_Data_Info) + plain_size);
+  cipher_buffer = malloc(sizeof(Client_Header) + plain_size);
 
-  c_info = (Client_Data_Info *)cipher_buffer;
+  c_info = (Client_Header *)cipher_buffer;
   c_info->size = plain_size;
   zcure_data_randomize(sizeof(c_info->iv), c_info->iv);
 
   rv = zcure_gcm_encrypt(c->aes_gcm_key, c_info->iv, sizeof(c_info->iv),
                          c_info, sizeof(c_info->size) + sizeof(c_info->iv),
                          plain_buffer, plain_size,
-                         cipher_buffer + sizeof(Client_Data_Info),
+                         cipher_buffer + sizeof(Client_Header),
                          c_info->tag, sizeof(c_info->tag));
   if (rv != 0)
   {
@@ -256,8 +256,8 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
   }
   else
   {
-    nb_sent_bytes = send(c->fd, cipher_buffer, sizeof(Client_Data_Info) + plain_size, 0);
-    if (nb_sent_bytes != sizeof(Client_Data_Info) + plain_size)
+    nb_sent_bytes = send(c->fd, cipher_buffer, sizeof(Client_Header) + plain_size, 0);
+    if (nb_sent_bytes != sizeof(Client_Header) + plain_size)
     {
       fprintf(stderr, "Cannot send all the data through the secure channel\n");
       return -1;
@@ -272,7 +272,7 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
 int zcure_client_receive(int cid, void **plain_buffer)
 {
   void *cipher_buffer = NULL;
-  Client_Data_Info c_info;
+  Client_Header c_info;
   struct Connection *c = _connection_find_by_cid(cid);
   int rv;
 
@@ -280,8 +280,8 @@ int zcure_client_receive(int cid, void **plain_buffer)
 
   if (!c) return -1;
 
-  rv = recv(c->fd, &c_info, sizeof(Client_Data_Info), 0);
-  if (rv != sizeof(Client_Data_Info))
+  rv = recv(c->fd, &c_info, sizeof(Client_Header), 0);
+  if (rv != sizeof(Client_Header))
   {
     perror("recv info from server");
     return -1;

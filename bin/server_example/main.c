@@ -18,13 +18,32 @@ int main(void)
 
   while (nb > 0)
   {
-    Client_Info client;
+    uint32_t src_id;
+    Server2ServerApp_DataType type;
     char *buf = NULL;
-    int nb = zcure_server_receive(fd, (void **)&buf, &client);
+    int nb = zcure_server_receive(fd, (void **)&buf, &type, &src_id);
     if (nb > 0)
     {
-      printf("%d bytes received from client %d - IP %08X\n", nb, client.id, client.ip);
-      zcure_server_send(fd, client.id, buf, nb);
+      printf("%d bytes received from client %d\n", nb, src_id);
+      switch (type)
+      {
+        case CLIENT_CONNECT_NOTIFICATION:
+        {
+          Server2ServerApp_ClientConnectNotification *notif = (Server2ServerApp_ClientConnectNotification *)buf;
+          printf("New connection from %s - IP: %X\n", notif->name, notif->ip);
+          break;
+        }
+        case CLIENT_DATA:
+        {
+          zcure_server_send(fd, src_id, buf, nb);
+          break;
+        }
+        default:
+        {
+          printf("Unsupported data type: %d\n", type);
+          break;
+        }
+      }
       free(buf);
     }
   }

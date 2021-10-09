@@ -18,6 +18,11 @@ int zcure_server_register(const char *service)
   int err = 0;
   int fd = -1;
   struct sockaddr_un socket_unix;
+  ServerConnectionRequest req;
+
+  if (!service) goto err;
+
+  memcpy(req.service, service, strlen(service) + 1);
 
   // create the socket
   fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -37,7 +42,7 @@ int zcure_server_register(const char *service)
 
   if (connect(fd, (struct sockaddr *)&socket_unix, sizeof(socket_unix)) < 0) goto err;
 
-  send(fd, service, strlen(service) + 1, 0);
+  send(fd, &req, sizeof(req), 0);
 
   if (recv(fd, &err, sizeof(int), 0) != sizeof(int))
   {
@@ -54,22 +59,22 @@ int zcure_server_register(const char *service)
   return fd;
 
 err:
-  close(fd);
+  if (fd <= 0) close(fd);
   return -1;
 }
 
 int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsigned int plain_size)
 {
-  ServerApp2Server_Data_Info s_info;
+  ServerApp2Server_Header s_info;
   int rv;
 
   s_info.size = plain_size;
-  s_info.client_id = client_id;
+  s_info.dest_id = client_id;
 
   rv = send(fd, &s_info, sizeof(s_info), 0);
   if (rv <= 0)
   {
-    perror("send ServerApp2Server_Data_Info");
+    perror("send ServerApp2Server_Header");
     return -1;
   }
 
@@ -83,28 +88,32 @@ int zcure_server_send(int fd, uint32_t client_id, const void *plain_buffer, unsi
   return rv;
 }
 
-int zcure_server_receive(int fd, void **plain_buffer, Client_Info *client_info)
+int zcure_server_receive(int fd, void **plain_buffer, Server2ServerApp_DataType *type, uint32_t *src_id)
 {
+  Server2ServerApp_Header sh;
   int rv;
 
-  if (!plain_buffer || !client_info) return -1;
+  if (!plain_buffer || !type) return -1;
 
-  rv = recv(fd, client_info, sizeof(Server2ServerApp_Data_Info), 0);
-  if (rv <= 0 || rv != sizeof(Server2ServerApp_Data_Info))
+  rv = recv(fd, &sh, sizeof(Server2ServerApp_Header), 0);
+  if (rv <= 0 || rv != sizeof(Server2ServerApp_Header))
   {
-    if (rv < 0) perror("recv Server2ServerApp_Data_Info");
+    if (rv < 0) perror("recv Server2ServerApp_Header");
     return -1;
   }
 
   // FIXME: check size limitation
 
-  *plain_buffer = malloc(client_info->size);
-  rv = recv(fd, *plain_buffer, client_info->size, 0);
+  *plain_buffer = malloc(sh.size);
+  rv = recv(fd, *plain_buffer, sh.size, 0);
   if (rv <= 0)
   {
     if (rv < 0) perror("recv data");
     return -1;
   }
+
+  if (src_id) *src_id = sh.src_id;
+  *type = sh.data_type;
 
   return rv;
 }

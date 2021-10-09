@@ -7,7 +7,6 @@
 int main(int argc, char **argv)
 {
   int cid;
-  char c = '\0';
 
   if (argc != 2)
   {
@@ -21,12 +20,6 @@ int main(int argc, char **argv)
   if (cid == -1)
   {
     fprintf(stderr, "Cannot establish a secure connection to %s\n", argv[1]);
-    return EXIT_FAILURE;
-  }
-
-  if (zcure_client_send(cid, &c, sizeof(c)) != sizeof(c))
-  {
-    fprintf(stderr, "Send over secure connection failed\n");
     return EXIT_FAILURE;
   }
 
