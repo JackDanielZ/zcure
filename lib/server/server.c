@@ -104,12 +104,15 @@ int zcure_server_receive(int fd, void **plain_buffer, Server2ServerApp_DataType 
 
   // FIXME: check size limitation
 
-  *plain_buffer = malloc(sh.size);
-  rv = recv(fd, *plain_buffer, sh.size, 0);
-  if (rv <= 0)
+  if (sh.size != 0)
   {
-    if (rv < 0) perror("recv data");
-    return -1;
+    *plain_buffer = malloc(sh.size);
+    rv = recv(fd, *plain_buffer, sh.size, 0);
+    if (rv <= 0)
+    {
+      if (rv < 0) perror("recv data");
+      return -1;
+    }
   }
 
   if (src_id) *src_id = sh.src_id;

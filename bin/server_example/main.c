@@ -30,7 +30,12 @@ int main(void)
         case CLIENT_CONNECT_NOTIFICATION:
         {
           Server2ServerApp_ClientConnectNotification *notif = (Server2ServerApp_ClientConnectNotification *)buf;
-          printf("New connection from %s - IP: %X\n", notif->name, notif->ip);
+          printf("New connection from %s - ID %d - IP: %X\n", notif->name, src_id, notif->ip);
+          break;
+        }
+        case CLIENT_DISCONNECT_NOTIFICATION:
+        {
+          printf("Disconnection of client %d\n", src_id);
           break;
         }
         case CLIENT_DATA:

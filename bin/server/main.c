@@ -466,6 +466,7 @@ static int
 _handle_client(Connection *conn)
 {
   int rv;
+  Server2ServerApp_Header hdr;
 
   switch (conn->state)
   {
@@ -478,7 +479,6 @@ _handle_client(Connection *conn)
       unsigned char iv0[12] = {0};
       ClientConnectionRequest conn_req;
       ClientConnectionResponse conn_rsp;
-      Server2ServerApp_Header hdr;
       Server2ServerApp_ClientConnectNotification notif;
 
       /* Receive the encrypted ClientConnectionRequest */
@@ -588,6 +588,13 @@ _handle_client(Connection *conn)
       if (rv != sizeof(Client_Header))
       {
         if (rv < 0) perror("recv Client_Header");
+
+        /* Notify the server about the client disconnection */
+        hdr.size = 0;
+        hdr.data_type = CLIENT_DISCONNECT_NOTIFICATION;
+        hdr.src_id = conn->id;
+
+        send(conn->service->fd, &hdr, sizeof(hdr), 0);
         return -1;
       }
 
