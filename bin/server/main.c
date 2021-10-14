@@ -366,7 +366,7 @@ _handle_server(Connection *conn)
       rv = recv(conn->fd, &req, sizeof(req), 0);
       if (rv <= 0)
       {
-        if (rv < 0) perror("recv");
+        if (rv < 0) LOGGER_ERROR("recv from server failed: %s", strerror(errno));
         return -1;
       }
 
@@ -407,7 +407,7 @@ _handle_server(Connection *conn)
       rv = recv(conn->fd, &s_info, sizeof(s_info), 0);
       if (rv <= 0 || rv != sizeof(s_info))
       {
-        if (rv < 0) perror("recv Server2ServerApp_Header");
+        if (rv < 0) LOGGER_ERROR("recv Server2ServerApp_Header failed: %s", strerror(errno));
         return -1;
       }
 
@@ -429,7 +429,7 @@ _handle_server(Connection *conn)
       rv = recv(conn->fd, data + sizeof(Client_Header), c_info->size, 0);
       if (rv <= 0)
       {
-        if (rv < 0) perror("recv");
+        if (rv < 0) LOGGER_ERROR("recv data from server failed: %s", strerror(errno));
         return -1;
       }
 
@@ -485,7 +485,7 @@ _handle_client(Connection *conn)
       data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), 0);
       if (data_size != sizeof(ClientConnectionRequest))
       {
-        if (data_size < 0) perror("recv");
+        if (data_size < 0) LOGGER_ERROR("recv ClientConnectionRequest failed: %s", strerror(errno));
         return -1;
       }
 
@@ -565,15 +565,18 @@ _handle_client(Connection *conn)
       /* Send the encrypted ClientConnectionResponse */
       nb_bytes = send(conn->fd, &conn_rsp, sizeof(conn_rsp), 0);
 
-      /* Notify the server about the new client connection */
-      hdr.size = sizeof(notif);
-      hdr.data_type = CLIENT_CONNECT_NOTIFICATION;
-      hdr.src_id = conn->id;
-      notif.ip = conn->ip;
-      strcpy(notif.name, conn->name);
+      if (nb_bytes > 0)
+      {
+        /* Notify the server about the new client connection */
+        hdr.size = sizeof(notif);
+        hdr.data_type = CLIENT_CONNECT_NOTIFICATION;
+        hdr.src_id = conn->id;
+        notif.ip = conn->ip;
+        strcpy(notif.name, conn->name);
 
-      send(conn->service->fd, &hdr, sizeof(hdr), 0);
-      send(conn->service->fd, &notif, sizeof(notif), 0);
+        send(conn->service->fd, &hdr, sizeof(hdr), 0);
+        send(conn->service->fd, &notif, sizeof(notif), 0);
+      }
 
       return nb_bytes;
     }
@@ -587,7 +590,7 @@ _handle_client(Connection *conn)
       rv = recv(conn->fd, &c_info, sizeof(Client_Header), 0);
       if (rv != sizeof(Client_Header))
       {
-        if (rv < 0) perror("recv Client_Header");
+        if (rv < 0) LOGGER_ERROR("recv Client_Header failed: %s", strerror(errno));
 
         /* Notify the server about the client disconnection */
         hdr.size = 0;
@@ -610,7 +613,7 @@ _handle_client(Connection *conn)
       rv = recv(conn->fd, data + sizeof(Server2ServerApp_Header), c_info.size, 0);
       if (rv <= 0)
       {
-        if (rv < 0) perror("recv");
+        if (rv < 0) LOGGER_ERROR("recv Server2ServerApp_Header failed: %s", strerror(errno));
         return -1;
       }
 
@@ -763,7 +766,7 @@ int main(int argc, char **argv)
         if (new_fd == -1)
         {
           LOGGER_ERROR("remote accept failed: %s", strerror(errno));
-          return EXIT_FAILURE;
+          continue;
         }
 
         conn = calloc(1, sizeof(Connection));
@@ -782,7 +785,8 @@ int main(int argc, char **argv)
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
           LOGGER_ERROR("remote epoll_ctl failed: %s", strerror(errno));
-          return EXIT_FAILURE;
+          close(new_fd);
+          continue;
         }
 
         LOGGER_INFO("Connection from client %d", conn->id);
@@ -798,7 +802,7 @@ int main(int argc, char **argv)
         if (new_fd == -1)
         {
           LOGGER_ERROR("local accept failed: %s", strerror(errno));
-          return EXIT_FAILURE;
+          continue;
         }
 
         conn = calloc(1, sizeof(Connection));
@@ -815,7 +819,8 @@ int main(int argc, char **argv)
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &event))
         {
           LOGGER_ERROR("local epoll_ctl failed: %s", strerror(errno));
-          return EXIT_FAILURE;
+          close(new_fd);
+          continue;
         }
 
         LOGGER_INFO("Connection from server");
