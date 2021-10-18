@@ -174,6 +174,8 @@ zcure_gcm_encrypt(const unsigned char *key,
   int outlen, rv;
 
   ctx = EVP_CIPHER_CTX_new();
+  EVP_CIPHER_CTX_set_padding(ctx, 1);
+
   /* Set cipher type and mode */
   EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, iv);
 
@@ -234,6 +236,8 @@ zcure_gcm_decrypt(const unsigned char *key,
   int outlen, rv;
 
   ctx = EVP_CIPHER_CTX_new();
+  EVP_CIPHER_CTX_set_padding(ctx, 1);
+
   /* Set cipher type and mode */
   EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, iv);
 

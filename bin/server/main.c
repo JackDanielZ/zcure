@@ -449,6 +449,11 @@ _handle_server(Connection *conn)
       }
 
       rv = send(client->fd, data, sizeof(Client_Header) + c_info->size, 0);
+      if (rv != (int)(sizeof(Client_Header) + c_info->size))
+      {
+        LOGGER_ERROR("send to client %s failed: %s", conn->name, strerror(errno));
+        return -1;
+      }
 
       free(data);
 
@@ -634,7 +639,7 @@ _handle_client(Connection *conn)
 
       if (conn->service)
       {
-        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + s_info->size, 0);
+        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + c_info.size, 0);
       }
       else
       {
@@ -832,6 +837,14 @@ int main(int argc, char **argv)
         {
           if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
+            if (conn->is_server)
+            {
+              LOGGER_INFO("Connection closed with server %s", conn->name);
+            }
+            else
+            {
+              LOGGER_INFO("Connection closed with client %s", conn->name);
+            }
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
             _connection_free(conn);
           }

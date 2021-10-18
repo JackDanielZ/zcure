@@ -222,6 +222,7 @@ zcure_client_disconnect(int cid)
   struct Connection *c = _connection_find_by_cid(cid);
   if (!c) return -1;
 
+  close(c->fd);
   _connection_remove(c);
 
   free(c);
@@ -289,7 +290,7 @@ int zcure_client_receive(int cid, void **plain_buffer)
 
   cipher_buffer = malloc(c_info.size);
 
-  rv = recv(c->fd, cipher_buffer, c_info.size, 0);
+  rv = recv(c->fd, cipher_buffer, c_info.size, MSG_WAITALL);
   if (rv != (int)c_info.size)
   {
     perror("recv data from server");
