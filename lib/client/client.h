@@ -12,4 +12,6 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
 
 int zcure_client_receive(int cid, void **plain_buffer);
 
+int zcure_client_get_fd(int cid);
+
 #endif /* __ZCURE_CLIENT_H__ */

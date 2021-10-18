@@ -1,0 +1,12 @@
+[Unit]
+Description=Port forwarder transmission 9091
+After=zcure.service
+
+[Service]
+User=$USER
+WorkingDirectory=$HOME
+ExecStart=$PREFIX/bin/zcure_port_forwarder_server transmission:9091
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

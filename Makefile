@@ -8,7 +8,14 @@ LDFLAGS := -L$(BUILD) -L/usr/lib -lssl -lcrypto -lcurl -ljson-c
 
 PREFIX ?= /usr
 
-all: $(BUILD)/libzcure_client.so $(BUILD)/zcure_client_example $(BUILD)/zcure_server $(BUILD)/libzcure_server.so $(BUILD)/zcure_server_example $(BUILD)/ip_logger_client $(BUILD)/ip_logger_server $(BUILD)/zcure.service $(BUILD)/ip_logger.service
+all: \
+	$(BUILD)/libzcure_client.so $(BUILD)/libzcure_server.so \
+	$(BUILD)/zcure_server \
+	$(BUILD)/zcure_client_example $(BUILD)/zcure_server_example \
+	$(BUILD)/ip_logger_client $(BUILD)/ip_logger_server \
+	$(BUILD)/zcure_port_forwarder $(BUILD)/zcure_port_forwarder_server \
+	$(BUILD)/zcure.service $(BUILD)/ip_logger.service \
+	$(BUILD)/zcure_port_forwarder_transmission_9091.service
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
@@ -39,10 +46,15 @@ $(BUILD)/ip_logger_server: LDFLAGS += -lzcure_server
 $(BUILD)/ip_logger_server: $(BUILD)/bin/ip_logger/server_app.o $(BUILD)/libzcure_server.so
 	gcc $< -o $@ $(CFLAGS) $(LDFLAGS)
 
-$(BUILD)/zcure.service: service/zcure.service
-	PREFIX=${PREFIX} envsubst < $^ > $@
+$(BUILD)/zcure_port_forwarder: LDFLAGS += -lzcure_client
+$(BUILD)/zcure_port_forwarder: $(BUILD)/bin/port_forwarder/client_app.o $(BUILD)/libzcure_client.so
+	gcc $< -o $@ $(CFLAGS) $(LDFLAGS)
 
-$(BUILD)/ip_logger.service: service/ip_logger.service
+$(BUILD)/zcure_port_forwarder_server: LDFLAGS += -lzcure_server
+$(BUILD)/zcure_port_forwarder_server: $(BUILD)/bin/port_forwarder/server_app.o $(BUILD)/libzcure_server.so
+	gcc $< -o $@ $(CFLAGS) $(LDFLAGS)
+
+$(BUILD)/%.service: service/%.service
 	PREFIX=${PREFIX} envsubst < $^ > $@
 
 install:
@@ -52,8 +64,8 @@ install:
 	install $(BUILD)/libzcure_server.so $(PREFIX)/lib/
 	install $(BUILD)/zcure_server $(PREFIX)/bin/
 	install $(BUILD)/ip_logger_* $(PREFIX)/bin/
-	install -m 644 $(BUILD)/zcure.service /etc/systemd/system/
-	install -m 644 $(BUILD)/ip_logger.service /etc/systemd/system/
+	install $(BUILD)/zcure_port_forwarder* $(PREFIX)/bin/
+	install -m 644 $(BUILD)/*.service /etc/systemd/system/
 
 clean:
 	rm -rf $(BUILD)/*

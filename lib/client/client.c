@@ -314,6 +314,12 @@ int zcure_client_receive(int cid, void **plain_buffer)
 }
 
 int
+zcure_client_get_fd(int cid)
+{
+  return cid;
+}
+
+int
 zcure_client_init(void)
 {
   OpenSSL_add_all_algorithms();
