@@ -20,6 +20,7 @@
 
 struct _Connection
 {
+  char client_name[USERNAME_SIZE];
   int app_fd; /* Socket to the app server */
   int zcure_id; /* zcure identifier of the client */
 
@@ -136,6 +137,7 @@ int main(int argc, char **argv)
             Server2ServerApp_ClientConnectNotification *notif = (Server2ServerApp_ClientConnectNotification *)buf;
             Connection *conn = calloc(1, sizeof(Connection));
 
+            memcpy(conn->client_name, notif->name, USERNAME_SIZE);
             conn->app_fd = socket(AF_INET, SOCK_STREAM, 0);
             conn->zcure_id = cid;
 
@@ -180,6 +182,7 @@ int main(int argc, char **argv)
             Connection *conn = _connection_find_by_id(cid);
             if (conn)
             {
+              LOGGER_INFO("Disconnection from port %d of client %s", server_port, conn->client_name);
               close(conn->app_fd);
             }
           }
