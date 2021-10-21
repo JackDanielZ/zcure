@@ -298,7 +298,7 @@ int zcure_client_receive(int cid, void **plain_buffer)
   }
 
   rv = zcure_gcm_decrypt(c->aes_gcm_key, c_info.iv, sizeof(c_info.iv),
-                         &c_info, sizeof(c_info.size),
+                         &c_info, sizeof(c_info.size) + sizeof(c_info.iv),
                          cipher_buffer, c_info.size,
                          cipher_buffer,
                          c_info.tag, sizeof(c_info.tag));
