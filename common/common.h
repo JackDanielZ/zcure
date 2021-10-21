@@ -97,7 +97,8 @@ zcure_gcm_decrypt(const unsigned char *key,
 /* Logger APIs */
 
 extern char *__progname;
-extern unsigned int logger_first_call;
+extern unsigned int _logger_first_call;
+extern unsigned int _log_to_file;
 
 #define LOGGER_PRINT(__type, __fmt, ...) \
   do { \
@@ -107,21 +108,29 @@ extern unsigned int logger_first_call;
     char *__timetext = asctime(localtime(&__current_time)); \
     \
     __timetext[strlen(__timetext) - 1] = '\0'; \
-    if (logger_first_call == 1) \
+    if (_logger_first_call == 1) \
     { \
-      sprintf(__path, "%s/.zcure", getenv("HOME")); \
-      mkdir(__path, S_IRWXU); \
-      sprintf(__path, "%s/.zcure/logs", getenv("HOME")); \
-      mkdir(__path, S_IRWXU); \
+      _log_to_file = !(ttyname(STDIN_FILENO)); \
+      if (_log_to_file == 1) \
+      { \
+        sprintf(__path, "%s/.zcure", getenv("HOME")); \
+        mkdir(__path, S_IRWXU); \
+        sprintf(__path, "%s/.zcure/logs", getenv("HOME")); \
+        mkdir(__path, S_IRWXU); \
+      } \
     } \
-    logger_first_call = 0; \
-    sprintf(__path, "%s/.zcure/logs/%s.log", getenv("HOME"), __progname); \
-    __logger_fp = fopen(__path, "a"); \
+    _logger_first_call = 0; \
+    if (_log_to_file == 1) \
+    { \
+      sprintf(__path, "%s/.zcure/logs/%s.log", getenv("HOME"), __progname); \
+      __logger_fp = fopen(__path, "a"); \
+    } \
+    else __logger_fp = stdout; \
     if (__logger_fp != NULL) \
     { \
       fprintf(__logger_fp, "%s <%s> " __fmt "\n", __timetext, __type, ## __VA_ARGS__); \
       fflush(__logger_fp); \
-      fclose(__logger_fp); \
+      if (_log_to_file == 1) fclose(__logger_fp); \
     } \
   } while (0);
 
