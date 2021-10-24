@@ -58,9 +58,9 @@ _connection_find_by_id(int id)
 static void
 _usage(const char *error)
 {
-  if (error) printf("%s\n", error);
+  if (error) LOGGER_INFO("%s", error);
 
-  fprintf(stderr, "zcure_port_forwarder_server service:service_port\n");
+  LOGGER_ERROR("zcure_port_forwarder_server service:service_port");
   exit(1);
 }
 
@@ -96,7 +96,7 @@ int main(int argc, char **argv)
   zcure_fd = zcure_server_register(path);
   if (zcure_fd <= 0)
   {
-    fprintf(stderr, "Cannot register a port forwarder for the service %s port %d\n", service_name, server_port);
+    LOGGER_ERROR("Cannot register a port forwarder for the service %s port %d", service_name, server_port);
     goto exit;
   }
 
@@ -171,18 +171,18 @@ int main(int argc, char **argv)
             if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->app_fd, &event))
             {
               LOGGER_ERROR("epoll_ctl app_fd failed: %s", strerror(errno));
-              free(conn);
+              _connection_free(conn);
               continue;
             }
 
-            LOGGER_INFO("New connection to port %d from client %s", server_port, notif->name);
+            LOGGER_INFO("New connection to port %d from client %s - socket %d", server_port, notif->name, conn->app_fd);
           }
           else if (type == CLIENT_DISCONNECT_NOTIFICATION)
           {
             Connection *conn = _connection_find_by_id(cid);
             if (conn)
             {
-              LOGGER_INFO("Disconnection from port %d of client %s", server_port, conn->client_name);
+              LOGGER_INFO("Disconnection from port %d of client %s - closing fd %d", server_port, conn->client_name, conn->app_fd);
               close(conn->app_fd);
             }
           }
@@ -194,9 +194,13 @@ int main(int argc, char **argv)
               int nb_bytes = send(conn->app_fd, buf, nb, 0);
               if (nb_bytes <= 0)
               {
+                LOGGER_INFO("Socket %d closed", conn->app_fd);
                 close(conn->app_fd);
               }
-              printf("%d bytes sent to app\n", nb_bytes);
+              else
+              {
+//                LOGGER_INFO("%d bytes sent to app (fd %d)", nb_bytes, conn->app_fd);
+              }
             }
           }
         }
@@ -209,23 +213,41 @@ int main(int argc, char **argv)
         {
           if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
+            LOGGER_INFO("Connection closed with zcure server fd=%d", conn->app_fd);
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->app_fd, NULL);
+            close(conn->app_fd);
             _connection_free(conn);
           }
           else
           {
-            /* Data coming from the application to the zcure server */
-            int nb_bytes = recv(conn->app_fd, _app_buf, sizeof(_app_buf), 0);
-            if (nb_bytes <= 0)
+            int flags = 0;
+            int nb_bytes;
+
+            do
             {
-              close(conn->app_fd);
+              /* Data coming from the application to the zcure server */
+              nb_bytes = recv(conn->app_fd, _app_buf, sizeof(_app_buf), flags);
+              if (nb_bytes <= 0)
+              {
+                if (flags == 0)
+                {
+                  LOGGER_INFO("Closing connection with app (fd %d) - recv", conn->app_fd);
+                  close(conn->app_fd);
+                }
+              }
+              else
+              {
+//                LOGGER_INFO("%d bytes received from app (fd %d) to zcure (id %d)", nb_bytes, conn->app_fd, conn->zcure_id);
+                nb_bytes = zcure_server_send(zcure_fd, conn->zcure_id, _app_buf, nb_bytes);
+                if (nb_bytes <= 0)
+                {
+                  LOGGER_INFO("Closing connection with app (fd %d) - send", conn->app_fd);
+                  close(conn->app_fd);
+                }
+              }
+              flags = MSG_DONTWAIT;
             }
-            printf("%d bytes received from app\n", nb_bytes);
-            nb_bytes = zcure_server_send(zcure_fd, conn->zcure_id, _app_buf, nb_bytes);
-            if (nb_bytes <= 0)
-            {
-              close(conn->app_fd);
-            }
+            while (nb_bytes > 0);
           }
         }
       }

@@ -59,9 +59,9 @@ _connection_find_by_id(int id)
 static void
 _usage(const char *error)
 {
-  if (error) printf("%s\n", error);
+  if (error) LOGGER_INFO("%s", error);
 
-  fprintf(stderr, "zcure_port_forwarder user@server:port local_port:service:service_port\n");
+  LOGGER_ERROR("zcure_port_forwarder user@server:port local_port:service:service_port");
   exit(1);
 }
 
@@ -181,27 +181,31 @@ int main(int argc, char **argv)
         if (conn->app_fd == -1)
         {
           LOGGER_ERROR("remote accept failed: %s", strerror(errno));
-          goto exit;
+          free(conn);
+          continue;
         }
-
-        conn->zcure_id = zcure_client_connect(destination_str, path);
-        if (conn->zcure_id == -1)
-        {
-          fprintf(stderr, "Cannot establish a secure connection to %s\n", destination_str);
-          goto exit;
-        }
-
-        conn->next = _connections;
-        if (_connections) _connections->prev = conn;
-        _connections = conn;
 
         event.data.ptr = conn;
         event.events = EPOLLIN | EPOLLET;
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->app_fd, &event))
         {
           LOGGER_ERROR("epoll_ctl app_fd failed: %s", strerror(errno));
-          goto exit;
+          close(conn->app_fd);
+          free(conn);
+          continue;
         }
+
+        conn->zcure_id = zcure_client_connect(destination_str, path);
+        if (conn->zcure_id == -1)
+        {
+          LOGGER_ERROR("Cannot establish a secure connection to %s", destination_str);
+          close(conn->app_fd);
+          continue;
+        }
+
+        conn->next = _connections;
+        if (_connections) _connections->prev = conn;
+        _connections = conn;
 
         conn2 = calloc(1, sizeof(Connection));
         memcpy(conn2, conn, sizeof(Connection));
@@ -212,10 +216,11 @@ int main(int argc, char **argv)
         _connections = conn2;
         event.data.ptr = conn2;
 
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, zcure_client_get_fd(conn2->zcure_id), &event))
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, zcure_client_get_fd(conn->zcure_id), &event))
         {
           LOGGER_ERROR("epoll_ctl zcure_fd failed: %s", strerror(errno));
-          goto exit;
+          close(conn->app_fd);
+          continue;
         }
 
         LOGGER_INFO("Connection to client %d", conn->zcure_id);
@@ -228,6 +233,7 @@ int main(int argc, char **argv)
           if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->app_fd, NULL);
+            close(conn->app_fd);
             zcure_client_disconnect(conn->zcure_id);
             _connection_free(conn);
             conn = _connection_find_by_id(conn->app_fd);
@@ -237,44 +243,61 @@ int main(int argc, char **argv)
           {
             if (conn->is_from_app == 1)
             {
-              /* Data coming from the application to the zcure server */
-              int nb_bytes = recv(conn->app_fd, _app_buf, sizeof(_app_buf), 0);
-              if (nb_bytes <= 0)
+              int flags = 0;
+              int nb_bytes;
+
+              do
               {
-                printf("Socket closed\n");
-                close(conn->app_fd);
-              }
-              else
-              {
-                printf("Received %d bytes from the application to zcure\n", nb_bytes);
-                nb_bytes = zcure_client_send(conn->zcure_id, _app_buf, nb_bytes);
+                /* Data coming from the application to the zcure server */
+                nb_bytes = recv(conn->app_fd, _app_buf, sizeof(_app_buf), flags);
+                if (nb_bytes > 0)
+                {
+//                  LOGGER_INFO("Received %d bytes from the application (fd %d) to zcure (id %d)", nb_bytes, conn->app_fd, conn->zcure_id);
+                  nb_bytes = zcure_client_send(conn->zcure_id, _app_buf, nb_bytes);
+                }
                 if (nb_bytes <= 0)
                 {
-                  close(conn->app_fd);
+                  if (flags == 0)
+                  {
+                    LOGGER_INFO("Socket %d closed", conn->app_fd);
+                    close(conn->app_fd);
+                  }
                 }
+                flags = MSG_DONTWAIT;
               }
+              while (nb_bytes > 0);
             }
             else
             {
               /* Data coming from the zcure server to the application */
               void *zcure_buf = NULL;
-              printf("Receiving zcure data\n");
-              int nb_bytes = zcure_client_receive(conn->zcure_id, &zcure_buf);
-              if (nb_bytes <= 0)
+//              LOGGER_INFO("Receiving zcure data");
+              unsigned int is_blocking = 1;
+              int nb_bytes;
+              do
               {
-                printf("Socket closed\n");
-                close(conn->app_fd);
-              }
-              else
-              {
-                printf("Received %d bytes from zcure to the application\n", nb_bytes);
-                nb_bytes = send(conn->app_fd, zcure_buf, nb_bytes, 0);
-                if (nb_bytes <= 0)
+                nb_bytes = zcure_client_receive(conn->zcure_id, is_blocking, &zcure_buf);
+                if (nb_bytes > 0)
                 {
-                  close(conn->app_fd);
+//                  LOGGER_INFO("Received %d bytes from zcure (id %d) to the application (fd %d)", nb_bytes, conn->zcure_id, conn->app_fd);
+                  nb_bytes = send(conn->app_fd, zcure_buf, nb_bytes, 0);
+                  if (nb_bytes <= 0)
+                  {
+                    LOGGER_INFO("Send failed: socket %d closed", conn->app_fd);
+                    close(conn->app_fd);
+                  }
                 }
-                free(zcure_buf);
-              }
+                else
+                {
+                  if (is_blocking == 1)
+                  {
+                    LOGGER_INFO("Recv failed: socket %d closed", conn->app_fd);
+                    close(conn->app_fd);
+                  }
+                }
+                is_blocking = 0;
+              } while (nb_bytes > 0);
+              free(zcure_buf);
             }
           }
         }

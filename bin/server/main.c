@@ -350,7 +350,7 @@ _create_local_socket(const char *filename)
 }
 
 static int
-_handle_server(Connection *conn)
+_handle_server(Connection *conn, uint8_t is_blocking)
 {
   int rv;
 
@@ -363,7 +363,7 @@ _handle_server(Connection *conn)
 
       memset(&req, 0, sizeof(req));
 
-      rv = recv(conn->fd, &req, sizeof(req), 0);
+      rv = recv(conn->fd, &req, sizeof(req), MSG_WAITALL);
       if (rv <= 0)
       {
         if (rv < 0) LOGGER_ERROR("recv from server failed: %s", strerror(errno));
@@ -402,11 +402,13 @@ _handle_server(Connection *conn)
       Client_Header *c_info;
       char *data;
 
+//      LOGGER_INFO("Handle zcure server fd = %d", conn->fd);
       memset(&s_info, 0, sizeof(s_info));
 
-      rv = recv(conn->fd, &s_info, sizeof(s_info), 0);
+      rv = recv(conn->fd, &s_info, sizeof(s_info), is_blocking ? MSG_WAITALL : MSG_DONTWAIT);
       if (rv <= 0 || rv != sizeof(s_info))
       {
+        if (is_blocking == 0) return -1;
         if (rv < 0) LOGGER_ERROR("recv Server2ServerApp_Header failed: %s", strerror(errno));
         return -1;
       }
@@ -426,10 +428,15 @@ _handle_server(Connection *conn)
       c_info->size = s_info.size;
       zcure_data_randomize(sizeof(c_info->iv), c_info->iv);
 
-      rv = recv(conn->fd, data + sizeof(Client_Header), c_info->size, 0);
+      rv = recv(conn->fd, data + sizeof(Client_Header), c_info->size, MSG_WAITALL);
       if (rv <= 0)
       {
         if (rv < 0) LOGGER_ERROR("recv data from server failed: %s", strerror(errno));
+        return -1;
+      }
+      if (rv != (int)c_info->size)
+      {
+        LOGGER_ERROR("recv: wrong size received %d, expected %d", rv, c_info->size);
         return -1;
       }
 
@@ -452,9 +459,11 @@ _handle_server(Connection *conn)
       if (rv != (int)(sizeof(Client_Header) + c_info->size))
       {
         LOGGER_ERROR("send to client %s failed: %s", conn->name, strerror(errno));
-        return -1;
+        close(client->fd);
+        return 1;
       }
 
+//      LOGGER_INFO("xfer %d bytes from app server %d to zcure client %d", c_info->size, conn->fd, client->fd);
       free(data);
 
       return rv;
@@ -468,7 +477,7 @@ _handle_server(Connection *conn)
 }
 
 static int
-_handle_client(Connection *conn)
+_handle_client(Connection *conn, uint8_t is_blocking)
 {
   int rv;
   Server2ServerApp_Header hdr;
@@ -487,7 +496,7 @@ _handle_client(Connection *conn)
       Server2ServerApp_ClientConnectNotification notif;
 
       /* Receive the encrypted ClientConnectionRequest */
-      data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), 0);
+      data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), MSG_WAITALL);
       if (data_size != sizeof(ClientConnectionRequest))
       {
         if (data_size < 0) LOGGER_ERROR("recv ClientConnectionRequest failed: %s", strerror(errno));
@@ -579,8 +588,8 @@ _handle_client(Connection *conn)
         notif.ip = conn->ip;
         strcpy(notif.name, conn->name);
 
-        send(conn->service->fd, &hdr, sizeof(hdr), 0);
-        send(conn->service->fd, &notif, sizeof(notif), 0);
+        send(conn->service->fd, &hdr, sizeof(hdr), MSG_DONTWAIT);
+        send(conn->service->fd, &notif, sizeof(notif), MSG_DONTWAIT);
       }
 
       return nb_bytes;
@@ -591,10 +600,13 @@ _handle_client(Connection *conn)
       Server2ServerApp_Header *s_info;
       char *data;
 
+//      LOGGER_INFO("Handle zcure client fd = %d", conn->fd);
+
       /* Receive the header */
-      rv = recv(conn->fd, &c_info, sizeof(Client_Header), 0);
+      rv = recv(conn->fd, &c_info, sizeof(Client_Header), is_blocking ? MSG_WAITALL : MSG_DONTWAIT);
       if (rv != sizeof(Client_Header))
       {
+        if (is_blocking == 0) return -1;
         if (rv < 0) LOGGER_ERROR("recv Client_Header failed: %s", strerror(errno));
 
         /* Notify the server about the client disconnection */
@@ -615,7 +627,7 @@ _handle_client(Connection *conn)
       s_info->src_id = conn->id;
       s_info->data_type = CLIENT_DATA;
 
-      rv = recv(conn->fd, data + sizeof(Server2ServerApp_Header), c_info.size, 0);
+      rv = recv(conn->fd, data + sizeof(Server2ServerApp_Header), c_info.size, MSG_WAITALL);
       if (rv <= 0)
       {
         if (rv < 0) LOGGER_ERROR("recv Server2ServerApp_Header failed: %s", strerror(errno));
@@ -639,7 +651,8 @@ _handle_client(Connection *conn)
 
       if (conn->service)
       {
-        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + c_info.size, 0);
+        rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + c_info.size, MSG_DONTWAIT);
+//        LOGGER_INFO("xfer %d bytes from zcure client %d to app server %d", c_info.size, conn->fd, conn->service->fd);
       }
       else
       {
@@ -757,6 +770,7 @@ int main(int argc, char **argv)
   while(1)
   {
     event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+//    LOGGER_INFO("EPOLL wake up for %d events", event_count);
 
     for (i = 0; i < event_count; i++)
     {
@@ -835,6 +849,7 @@ int main(int argc, char **argv)
         Connection *conn = events[i].data.ptr;
         if (conn != NULL)
         {
+//          LOGGER_INFO("EPOLL event %d fd %d is_server %d events %X", i, conn->fd, conn->is_server, events[i].events);
           if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
             if (conn->is_server)
@@ -845,6 +860,7 @@ int main(int argc, char **argv)
             {
               LOGGER_INFO("Connection closed with client %s", conn->name);
             }
+            close(conn->fd);
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
             _connection_free(conn);
           }
@@ -853,20 +869,22 @@ int main(int argc, char **argv)
             if (conn->is_server)
             {
               /* Data coming from a server application */
-              if (_handle_server(conn) <= 0)
+              if (_handle_server(conn, 1) <= 0)
               {
                 LOGGER_INFO("Closing connection with server: Name=%s fd=%d", conn->name ? conn->name : "none", conn->fd);
                 close(conn->fd);
               }
+              while (_handle_server(conn, 0) > 0);
             }
             else
             {
               /* Data coming from a client */
-              if (_handle_client(conn) <= 0)
+              if (_handle_client(conn, 1) <= 0)
               {
                 LOGGER_INFO("Closing connection with client: Name=%s id=%d fd=%d", conn->name ? conn->name : "none", conn->id, conn->fd);
                 close(conn->fd);
               }
+              while (_handle_client(conn, 0) > 0);
             }
           }
         }

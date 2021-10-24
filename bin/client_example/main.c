@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  nb_recv_bytes = zcure_client_receive(cid, &recv_buffer);
+  nb_recv_bytes = zcure_client_receive(cid, 1, &recv_buffer);
   if (nb_recv_bytes <= 0)
   {
     fprintf(stderr, "Receive over secure connection failed\n");

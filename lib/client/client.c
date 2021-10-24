@@ -270,7 +270,7 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
   return plain_size;
 }
 
-int zcure_client_receive(int cid, void **plain_buffer)
+int zcure_client_receive(int cid, unsigned int is_blocking, void **plain_buffer)
 {
   void *cipher_buffer = NULL;
   Client_Header c_info;
@@ -281,10 +281,14 @@ int zcure_client_receive(int cid, void **plain_buffer)
 
   if (!c) return -1;
 
-  rv = recv(c->fd, &c_info, sizeof(Client_Header), 0);
+  rv = recv(c->fd, &c_info, sizeof(Client_Header), is_blocking ? MSG_WAITALL : MSG_DONTWAIT);
   if (rv != sizeof(Client_Header))
   {
-    perror("recv info from server");
+    if (is_blocking)
+    {
+      perror("recv info from server");
+      printf("RV = %d\n", rv);
+    }
     return -1;
   }
 
