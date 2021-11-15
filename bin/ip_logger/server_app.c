@@ -66,14 +66,14 @@ int main(void)
   home = getenv("HOME");
   if (home == NULL)
   {
-    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    LOGGER_ERROR("Cannot get $HOME from getenv\n");
     return 1;
   }
 
   zcure_fd = zcure_server_register("IP_Logger");
   if (zcure_fd <= 0)
   {
-    fprintf(stderr, "Cannot connect\n");
+    LOGGER_ERROR("Cannot connect\n");
     return 1;
   }
 
@@ -140,7 +140,6 @@ int main(void)
               sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%d.%d.%d.%d\" > /dev/null 2>&1",
                   namecheap_domain, namecheap_name, namecheap_key,
                   notif->ip & 0xFF, (notif->ip >> 8) & 0xFF, (notif->ip >> 16) & 0xFF, notif->ip >> 24);
-              printf(cmd);
               system(cmd);
             }
           }

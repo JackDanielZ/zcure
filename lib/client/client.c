@@ -84,7 +84,7 @@ _tcp_connect(const char *host, const char *port)
 
   s = getaddrinfo(host, port, &hints, &result);
   if (s != 0) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+    LOGGER_ERROR("getaddrinfo: %s\n", gai_strerror(s));
     return -1;
   }
 
@@ -102,7 +102,7 @@ _tcp_connect(const char *host, const char *port)
     close(sfd);
   }
 
-  fprintf(stderr, "Could not connect to %s:%s\n", host, port);
+  LOGGER_ERROR("Could not connect to %s:%s\n", host, port);
   sfd = -1;
 
 exit:
@@ -129,7 +129,7 @@ zcure_client_connect(const char *destination, const char *service)
   tmp = strchr(destination, '@');
   if (tmp == NULL)
   {
-    fprintf(stderr, "Expected '@', destination format: user@server:port\n");
+    LOGGER_ERROR("Expected '@', destination format: user@server:port\n");
     return -1;
   }
 
@@ -139,7 +139,7 @@ zcure_client_connect(const char *destination, const char *service)
   tmp = strchr(destination, ':');
   if (tmp == NULL)
   {
-    fprintf(stderr, "Expected ':', destination format: user@server:port\n");
+    LOGGER_ERROR("Expected ':', destination format: user@server:port\n");
     return -1;
   }
 
@@ -150,10 +150,10 @@ zcure_client_connect(const char *destination, const char *service)
 
   if (fd <= 0)
   {
-    fprintf(stderr, "TCP connection failed\n");
+    LOGGER_ERROR("TCP connection failed\n");
     return -1;
   }
-  printf("TCP connection to %s:%s established\n", server, port);
+  LOGGER_INFO("TCP connection to %s:%s established\n", server, port);
 
   zcure_data_randomize(sizeof(conn_req), &conn_req);
   strncpy(conn_req.username, username, sizeof(conn_req.username) - 1);
@@ -162,7 +162,7 @@ zcure_client_connect(const char *destination, const char *service)
   ecdh_key = zcure_ecdh_key_compute_for_username(server, conn_req.salt, sizeof(conn_req.salt), secret_len);
   if (ecdh_key == NULL)
   {
-    fprintf(stderr, "Failed to compute ECDH key\n");
+    LOGGER_ERROR("Failed to compute ECDH key\n");
     return -1;
   }
 
@@ -178,14 +178,14 @@ zcure_client_connect(const char *destination, const char *service)
                          conn_req.tag, sizeof(conn_req.tag));
   if (rv != 0)
   {
-    fprintf(stderr, "GCM Encryption of ClientConnectionRequest failed\n");
+    LOGGER_ERROR("GCM Encryption of ClientConnectionRequest failed\n");
     return -1;
   }
 
   LOGGER_INFO("Send ClientConnectionRequest");
   if (send(fd, &conn_req, sizeof(ClientConnectionRequest), 0) != sizeof(ClientConnectionRequest))
   {
-    fprintf(stderr, "Sending ClientConnectionRequest failed\n");
+    LOGGER_ERROR("Sending ClientConnectionRequest failed\n");
     return -1;
   }
 
@@ -193,7 +193,7 @@ zcure_client_connect(const char *destination, const char *service)
   size = recv(fd, &conn_rsp, sizeof(conn_rsp), 0);
   if (size <= 0)
   {
-    fprintf(stderr, "Error in reception of ClientConnectionResponse\n");
+    LOGGER_ERROR("Error in reception of ClientConnectionResponse\n");
     return -1;
   }
 
@@ -205,7 +205,7 @@ zcure_client_connect(const char *destination, const char *service)
                          conn_rsp.tag, sizeof(conn_rsp.tag));
   if (rv != 0)
   {
-    fprintf(stderr, "GCM Decryption of ClientConnectionResponse failed\n");
+    LOGGER_ERROR("GCM Decryption of ClientConnectionResponse failed\n");
     return -1;
   }
 
@@ -256,7 +256,7 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
                          c_info->tag, sizeof(c_info->tag));
   if (rv != 0)
   {
-    fprintf(stderr, "Cannot gcm encrypt data\n");
+    LOGGER_ERROR("Cannot gcm encrypt data\n");
     return -1;
   }
   else
@@ -264,7 +264,7 @@ int zcure_client_send(int cid, const void *plain_buffer, unsigned int plain_size
     nb_sent_bytes = send(c->fd, cipher_buffer, sizeof(Client_Header) + plain_size, 0);
     if (nb_sent_bytes != sizeof(Client_Header) + plain_size)
     {
-      fprintf(stderr, "Cannot send all the data through the secure channel\n");
+      LOGGER_ERROR("Cannot send all the data through the secure channel\n");
       return -1;
     }
   }
@@ -291,7 +291,7 @@ int zcure_client_receive(int cid, unsigned int is_blocking, void **plain_buffer)
     if (is_blocking)
     {
       perror("recv info from server");
-      printf("RV = %d\n", rv);
+      LOGGER_INFO("RV = %d\n", rv);
     }
     return -1;
   }
@@ -312,7 +312,7 @@ int zcure_client_receive(int cid, unsigned int is_blocking, void **plain_buffer)
                          c_info.tag, sizeof(c_info.tag));
   if (rv != 0)
   {
-    fprintf(stderr, "Cannot GCM decrypt data\n");
+    LOGGER_ERROR("Cannot GCM decrypt data\n");
     return -1;
   }
 

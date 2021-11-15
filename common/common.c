@@ -29,7 +29,7 @@ get_file_content_as_string(const char *filename, unsigned int *size)
 
   if (filename == NULL)
   {
-    fprintf(stderr, "Invalid parameters\n");
+    LOGGER_ERROR("Invalid parameters\n");
     return NULL;
   }
 
@@ -38,7 +38,7 @@ get_file_content_as_string(const char *filename, unsigned int *size)
 
   if (fp == NULL)
   {
-    fprintf(stderr, "Can not open file: \"%s\".\n", filename);
+    LOGGER_ERROR("Can not open file: \"%s\".\n", filename);
     return NULL;
   }
 
@@ -47,7 +47,7 @@ get_file_content_as_string(const char *filename, unsigned int *size)
 
   if (fsize < 0)
   {
-    fprintf(stderr, "Can not ftell file: \"%s\".\n", filename);
+    LOGGER_ERROR("Can not ftell file: \"%s\".\n", filename);
     goto exit;
   }
 
@@ -57,13 +57,13 @@ get_file_content_as_string(const char *filename, unsigned int *size)
     file_data = calloc(1, fsize + 1);
     if (!file_data)
     {
-      fprintf(stderr, "calloc failed\n");
+      LOGGER_ERROR("calloc failed\n");
       goto exit;
     }
     if (!fread(file_data, 1, fsize, fp)) {
       free(file_data);
       file_data = NULL;
-      if (!feof(fp)) fprintf(stderr, "fread failed\n");
+      if (!feof(fp)) LOGGER_ERROR("fread failed\n");
     }
     else {
       if (size) *size = fsize;
@@ -94,7 +94,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   home = getenv("HOME");
   if (home == NULL)
   {
-    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    LOGGER_ERROR("Cannot get $HOME from getenv\n");
     return NULL;
   }
 
@@ -102,7 +102,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   key_file_data = get_file_content_as_string(path, &key_file_data_size);
   if (!key_file_data || !key_file_data_size)
   {
-    fprintf(stderr, "Failed to read private key\n");
+    LOGGER_ERROR("Failed to read private key\n");
     return NULL;
   }
 
@@ -117,7 +117,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   key_file_data = get_file_content_as_string(path, &key_file_data_size);
   if (!key_file_data || !key_file_data_size)
   {
-    fprintf(stderr, "Failed to read key for user %s\n", username);
+    LOGGER_ERROR("Failed to read key for user %s\n", username);
     return NULL;
   }
 
@@ -134,7 +134,7 @@ zcure_ecdh_key_compute_for_username(const char *username, unsigned char *salt, u
   shared_secret = alloca(shared_secret_len + salt_len);
   if (!shared_secret)
   {
-    fprintf(stderr, "Failed to allocate memory for shared_secret.\n");
+    LOGGER_ERROR("Failed to allocate memory for shared_secret.\n");
     return NULL;
   }
 
@@ -189,7 +189,7 @@ zcure_gcm_encrypt(const unsigned char *key,
     rv = EVP_EncryptUpdate(ctx, NULL, &outlen, aad_buf, aad_len);
     if (rv == 0)
     {
-      fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptUpdate AAD failed\n");
+      LOGGER_ERROR("zcure_gcm_encrypt:EVP_EncryptUpdate AAD failed\n");
       return -1;
     }
   }
@@ -200,7 +200,7 @@ zcure_gcm_encrypt(const unsigned char *key,
     rv = EVP_EncryptUpdate(ctx, out_buf, &outlen, in_buf, in_len);
     if (rv == 0)
     {
-      fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptUpdate input failed\n");
+      LOGGER_ERROR("zcure_gcm_encrypt:EVP_EncryptUpdate input failed\n");
       return -1;
     }
   }
@@ -209,7 +209,7 @@ zcure_gcm_encrypt(const unsigned char *key,
   rv = EVP_EncryptFinal_ex(ctx, out_buf, &outlen);
   if (rv == 0)
   {
-    fprintf(stderr, "zcure_gcm_encrypt:EVP_EncryptFinal_ex failed\n");
+    LOGGER_ERROR("zcure_gcm_encrypt:EVP_EncryptFinal_ex failed\n");
     return -1;
   }
 
@@ -251,7 +251,7 @@ zcure_gcm_decrypt(const unsigned char *key,
     rv = EVP_DecryptUpdate(ctx, NULL, &outlen, aad_buf, aad_len);
     if (rv == 0)
     {
-      fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptUpdate AAD failed\n");
+      LOGGER_ERROR("zcure_gcm_decrypt:EVP_DecryptUpdate AAD failed\n");
       return -1;
     }
   }
@@ -262,7 +262,7 @@ zcure_gcm_decrypt(const unsigned char *key,
     rv = EVP_DecryptUpdate(ctx, out_buf, &outlen, in_buf, in_len);
     if (rv == 0)
     {
-      fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptUpdate input failed\n");
+      LOGGER_ERROR("zcure_gcm_decrypt:EVP_DecryptUpdate input failed\n");
       return -1;
     }
   }
@@ -273,7 +273,7 @@ zcure_gcm_decrypt(const unsigned char *key,
   rv = EVP_DecryptFinal_ex(ctx, out_buf, &outlen);
   if (rv == 0)
   {
-    fprintf(stderr, "zcure_gcm_decrypt:EVP_DecryptFinal_ex failed\n");
+    LOGGER_ERROR("zcure_gcm_decrypt:EVP_DecryptFinal_ex failed\n");
     return -1;
   }
 

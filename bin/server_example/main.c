@@ -8,11 +8,11 @@ int main(void)
   int fd = zcure_server_register("LOOP");
   int nb = 1; // Set to 1 to enter the loop
 
-  printf("fd %d\n", fd);
+  LOGGER_INFO("fd %d\n", fd);
 
   if (fd <= 0)
   {
-    fprintf(stderr, "Cannot connect\n");
+    LOGGER_ERROR("Cannot connect\n");
     return 1;
   }
 
@@ -24,18 +24,18 @@ int main(void)
     int nb = zcure_server_receive(fd, (void **)&buf, &type, &src_id);
     if (nb > 0)
     {
-      printf("%d bytes received from client %d\n", nb, src_id);
+      LOGGER_INFO("%d bytes received from client %d\n", nb, src_id);
       switch (type)
       {
         case CLIENT_CONNECT_NOTIFICATION:
         {
           Server2ServerApp_ClientConnectNotification *notif = (Server2ServerApp_ClientConnectNotification *)buf;
-          printf("New connection from %s - ID %d - IP: %X\n", notif->name, src_id, notif->ip);
+          LOGGER_INFO("New connection from %s - ID %d - IP: %X\n", notif->name, src_id, notif->ip);
           break;
         }
         case CLIENT_DISCONNECT_NOTIFICATION:
         {
-          printf("Disconnection of client %d\n", src_id);
+          LOGGER_INFO("Disconnection of client %d\n", src_id);
           break;
         }
         case CLIENT_DATA:
@@ -45,7 +45,7 @@ int main(void)
         }
         default:
         {
-          printf("Unsupported data type: %d\n", type);
+          LOGGER_INFO("Unsupported data type: %d\n", type);
           break;
         }
       }

@@ -135,7 +135,7 @@ _permissions_parse(void)
 
   if (home == NULL)
   {
-    fprintf(stderr, "Cannot get $HOME from getenv\n");
+    LOGGER_ERROR("Cannot get $HOME from getenv\n");
     goto exit;
   }
 
@@ -683,7 +683,7 @@ static struct option _long_options[] =
 static void
 _help(const char *prg_name)
 {
-  fprintf(stderr, "%s -p/--port port", prg_name);
+  LOGGER_ERROR("%s -p/--port port", prg_name);
 }
 
 int main(int argc, char **argv)

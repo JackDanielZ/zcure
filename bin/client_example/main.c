@@ -14,7 +14,7 @@ int main(int argc, char **argv)
   int nb_recv_bytes;
 
   if (argc != 2) {
-    fprintf(stderr, "Usage: %s user@server:port\n", argv[0]);
+    LOGGER_ERROR("Usage: %s user@server:port\n", argv[0]);
     return EXIT_FAILURE;
   }
 
@@ -23,7 +23,7 @@ int main(int argc, char **argv)
   cid = zcure_client_connect(argv[1], "LOOP");
   if (cid == -1)
   {
-    fprintf(stderr, "Cannot establish a secure connection to %s\n", argv[1]);
+    LOGGER_ERROR("Cannot establish a secure connection to %s\n", argv[1]);
     return EXIT_FAILURE;
   }
 
@@ -31,14 +31,14 @@ int main(int argc, char **argv)
 
   if (zcure_client_send(cid, buffer, sizeof(buffer)) != sizeof(buffer))
   {
-    fprintf(stderr, "Send over secure connection failed\n");
+    LOGGER_ERROR("Send over secure connection failed\n");
     return EXIT_FAILURE;
   }
 
   nb_recv_bytes = zcure_client_receive(cid, 1, &recv_buffer);
   if (nb_recv_bytes <= 0)
   {
-    fprintf(stderr, "Receive over secure connection failed\n");
+    LOGGER_ERROR("Receive over secure connection failed\n");
     return EXIT_FAILURE;
   }
 

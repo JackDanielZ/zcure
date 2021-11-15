@@ -10,7 +10,7 @@ int main(int argc, char **argv)
 
   if (argc != 2)
   {
-    fprintf(stderr, "Usage: %s user@server:port\n", argv[0]);
+    LOGGER_ERROR("Usage: %s user@server:port\n", argv[0]);
     return EXIT_FAILURE;
   }
 
@@ -19,7 +19,7 @@ int main(int argc, char **argv)
   cid = zcure_client_connect(argv[1], "IP_Logger");
   if (cid == -1)
   {
-    fprintf(stderr, "Cannot establish a secure connection to %s\n", argv[1]);
+    LOGGER_ERROR("Cannot establish a secure connection to %s\n", argv[1]);
     return EXIT_FAILURE;
   }
 

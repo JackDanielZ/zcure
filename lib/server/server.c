@@ -52,7 +52,7 @@ int zcure_server_register(const char *service)
 
   if (err != 0)
   {
-    fprintf(stderr, "Error during connection for service %s\n", service);
+    LOGGER_ERROR("Error during connection for service %s\n", service);
     goto err;
   }
 
