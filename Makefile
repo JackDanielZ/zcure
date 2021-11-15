@@ -15,7 +15,7 @@ all: \
 	$(BUILD)/ip_logger_client $(BUILD)/ip_logger_server \
 	$(BUILD)/zcure_port_forwarder $(BUILD)/zcure_port_forwarder_server \
 	$(BUILD)/zcure.service $(BUILD)/ip_logger.service \
-	$(BUILD)/zcure_port_forwarder_transmission_9091.service
+	$(BUILD)/zcure_port_forwarder_9091.service
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)

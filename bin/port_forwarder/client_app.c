@@ -61,7 +61,7 @@ _usage(const char *error)
 {
   if (error) LOGGER_INFO("%s", error);
 
-  LOGGER_ERROR("zcure_port_forwarder user@server:port local_port:service:service_port");
+  LOGGER_ERROR("zcure_port_forwarder user@server:port local_port:service_port");
   exit(1);
 }
 
@@ -111,10 +111,8 @@ _local_server_create(unsigned int port)
 int main(int argc, char **argv)
 {
   char path[256];
-  char *twodots = NULL;
   unsigned int local_port = 0, server_port = 0;
   int local_fd = -1, epoll_fd = -1, event_count, i;
-  char *service_name = NULL;
   const char *destination_str;
   char *forward_rule;
   int rc = EXIT_FAILURE;
@@ -128,15 +126,10 @@ int main(int argc, char **argv)
   local_port = strtol(forward_rule, &forward_rule, 10);
   if (*forward_rule != ':') _usage("Expected ':' after local port in forward rule");
   forward_rule++;
-  twodots = strchr(forward_rule, ':');
-  if (twodots == NULL) _usage("Expected ':' after service name in forward rule");
 
-  service_name = strndup(forward_rule, twodots - forward_rule);
-
-  forward_rule = twodots + 1;
   server_port = strtol(forward_rule, NULL, 10);
 
-  sprintf(path, "Port_Fwd_%s_%d", service_name, server_port);
+  sprintf(path, "Port_Fwd_%d", server_port);
 
   epoll_fd = epoll_create1(0);
   if (epoll_fd == -1)

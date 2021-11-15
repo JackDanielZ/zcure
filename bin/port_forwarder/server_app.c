@@ -60,7 +60,7 @@ _usage(const char *error)
 {
   if (error) LOGGER_INFO("%s", error);
 
-  LOGGER_ERROR("zcure_port_forwarder_server service:service_port");
+  LOGGER_ERROR("zcure_port_forwarder_server service_port");
   exit(1);
 }
 
@@ -69,10 +69,8 @@ int main(int argc, char **argv)
   char path[256];
   int zcure_fd;
   int nb;
-  char *twodots = NULL;
   unsigned int server_port = 0;
   int epoll_fd = -1, event_count, i;
-  char *service_name = NULL;
   char *forward_rule;
   int rc = EXIT_FAILURE;
   struct epoll_event event = {0}, events[MAX_EVENTS];
@@ -81,22 +79,16 @@ int main(int argc, char **argv)
 
   forward_rule = argv[1];
 
-  twodots = strchr(forward_rule, ':');
-  if (twodots == NULL) _usage("Expected ':' after service name in forward rule");
-
-  service_name = strndup(forward_rule, twodots - forward_rule);
-
-  forward_rule = twodots + 1;
   server_port = strtol(forward_rule, NULL, 10);
 
-  sprintf(path, "Port_Fwd_%s_%d", service_name, server_port);
+  sprintf(path, "Port_Fwd_%d", server_port);
 
   LOGGER_INFO("START");
 
   zcure_fd = zcure_server_register(path);
   if (zcure_fd <= 0)
   {
-    LOGGER_ERROR("Cannot register a port forwarder for the service %s port %d", service_name, server_port);
+    LOGGER_ERROR("Cannot register a port forwarder for the port %d", server_port);
     goto exit;
   }
 
