@@ -170,6 +170,7 @@ zcure_client_connect(const char *destination, const char *service)
     printf("%02X ", ecdh_key[i]);
   printf("\n");
 
+  LOGGER_INFO("Encrypt ClientConnectionRequest");
   rv = zcure_gcm_encrypt(ecdh_key, iv0, sizeof(iv0),
                          conn_req.username, sizeof(conn_req.username) + sizeof(conn_req.salt),
                          conn_req.service, sizeof(conn_req.service),
@@ -181,12 +182,14 @@ zcure_client_connect(const char *destination, const char *service)
     return -1;
   }
 
+  LOGGER_INFO("Send ClientConnectionRequest");
   if (send(fd, &conn_req, sizeof(ClientConnectionRequest), 0) != sizeof(ClientConnectionRequest))
   {
     fprintf(stderr, "Sending ClientConnectionRequest failed\n");
     return -1;
   }
 
+  LOGGER_INFO("Recv ClientConnectionResponse");
   size = recv(fd, &conn_rsp, sizeof(conn_rsp), 0);
   if (size <= 0)
   {
@@ -194,6 +197,7 @@ zcure_client_connect(const char *destination, const char *service)
     return -1;
   }
 
+  LOGGER_INFO("Decrypt ClientConnectionResponse");
   rv = zcure_gcm_decrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
                          conn_rsp.iv, sizeof(conn_rsp.iv),
                          &(conn_rsp.status), offsetof(ClientConnectionResponse, tag) - offsetof(ClientConnectionResponse, status),

@@ -496,6 +496,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       Server2ServerApp_ClientConnectNotification notif;
 
       /* Receive the encrypted ClientConnectionRequest */
+      LOGGER_INFO("Recv ClientConnectionRequest");
       data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), MSG_WAITALL);
       if (data_size != sizeof(ClientConnectionRequest))
       {
@@ -521,6 +522,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
        * Data to authenticate: username + salt + service
        * Data to decrypt: service
        */
+      LOGGER_INFO("Decrypt ClientConnectionRequest");
       rv = zcure_gcm_decrypt(ecdh_key, iv0, sizeof(iv0),
                              conn_req.username, sizeof(conn_req.username) + sizeof(conn_req.salt),
                              conn_req.service, sizeof(conn_req.service),
@@ -559,6 +561,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       /*
        * Data to encrypt: response - tag
        */
+      LOGGER_INFO("Encrypt ClientConnectionResponse");
       rv = zcure_gcm_encrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
                              conn_rsp.iv, sizeof(conn_rsp.iv),
                              &(conn_rsp.status), offsetof(ClientConnectionResponse, tag) - offsetof(ClientConnectionResponse, status),
@@ -579,6 +582,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
 
       /* Send the encrypted ClientConnectionResponse */
       nb_bytes = send(conn->fd, &conn_rsp, sizeof(conn_rsp), 0);
+      LOGGER_INFO("Send ClientConnectionResponse: %d", nb_bytes);
 
       if (nb_bytes > 0)
       {
