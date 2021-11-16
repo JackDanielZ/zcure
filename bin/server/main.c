@@ -455,12 +455,11 @@ _handle_server(Connection *conn, uint8_t is_blocking)
         return -1;
       }
 
-      rv = send(client->fd, data, sizeof(Client_Header) + c_info->size, 0);
+      rv = send(client->fd, data, sizeof(Client_Header) + c_info->size, MSG_DONTWAIT);
       if (rv != (int)(sizeof(Client_Header) + c_info->size))
       {
         LOGGER_ERROR("send to client %s failed: %s", conn->name, strerror(errno));
-        close(client->fd);
-        return 1;
+        return -1;
       }
 
       LOGGER_INFO("xfer %d bytes from app server %d to zcure client %d", c_info->size, conn->fd, client->fd);
