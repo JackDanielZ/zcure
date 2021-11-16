@@ -500,7 +500,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       data_size = recv(conn->fd, &conn_req, sizeof(ClientConnectionRequest), MSG_WAITALL);
       if (data_size != sizeof(ClientConnectionRequest))
       {
-        if (data_size < 0) LOGGER_ERROR("recv ClientConnectionRequest failed: %s", strerror(errno));
+        LOGGER_ERROR("recv ClientConnectionRequest (size %d/%ld) failed: %s", data_size, sizeof(ClientConnectionRequest), strerror(errno));
         return -1;
       }
 
