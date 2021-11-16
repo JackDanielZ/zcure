@@ -554,13 +554,14 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       /* Store AES info */
       memcpy(conn->aes_gcm_key, conn_rsp.aes_gcm_key, sizeof(conn_rsp.aes_gcm_key));
       conn_rsp.status = 0;
+      conn_rsp.id = conn->id;
 
       /*
        * Data to encrypt: response - tag
        */
       rv = zcure_gcm_encrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
                              conn_rsp.iv, sizeof(conn_rsp.iv),
-                             &(conn_rsp.status), sizeof(conn_rsp.status) + sizeof(conn_rsp.aes_gcm_key),
+                             &(conn_rsp.status), offsetof(ClientConnectionResponse, tag) - offsetof(ClientConnectionResponse, status),
                              &(conn_rsp.status),
                              conn_rsp.tag, sizeof(conn_rsp.tag));
       if (rv != 0)

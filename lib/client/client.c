@@ -196,7 +196,7 @@ zcure_client_connect(const char *destination, const char *service)
 
   rv = zcure_gcm_decrypt(ecdh_key, conn_rsp.iv, sizeof(conn_rsp.iv),
                          conn_rsp.iv, sizeof(conn_rsp.iv),
-                         &(conn_rsp.status), sizeof(conn_rsp.status) + sizeof(conn_rsp.aes_gcm_key),
+                         &(conn_rsp.status), offsetof(ClientConnectionResponse, tag) - offsetof(ClientConnectionResponse, status),
                          &(conn_rsp.status),
                          conn_rsp.tag, sizeof(conn_rsp.tag));
   if (rv != 0)
@@ -209,7 +209,7 @@ zcure_client_connect(const char *destination, const char *service)
   c->fd = fd;
   memcpy(c->aes_gcm_key, conn_rsp.aes_gcm_key, sizeof(c->aes_gcm_key));
 
-  c->cid = fd;
+  c->cid = conn_rsp.id;
   c->next = _connections;
   _connections = c;
 
@@ -320,7 +320,9 @@ int zcure_client_receive(int cid, unsigned int is_blocking, void **plain_buffer)
 int
 zcure_client_get_fd(int cid)
 {
-  return cid;
+  struct Connection *c = _connection_find_by_cid(cid);
+  if (!c) return -1;
+  return c->fd;
 }
 
 int

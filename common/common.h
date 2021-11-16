@@ -49,7 +49,8 @@ typedef struct
 typedef struct
 {
   uint8_t iv[AES_BLOCK_SIZE];
-  uint8_t status;
+  uint32_t status;
+  uint32_t id;
   uint8_t aes_gcm_key[32];
   uint8_t tag[16];
 } ClientConnectionResponse;
