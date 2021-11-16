@@ -216,7 +216,7 @@ int main(int argc, char **argv)
           continue;
         }
 
-        LOGGER_INFO("Connection to client %d", conn->zcure_id);
+        LOGGER_INFO("Connection to local client (fd=%d) and to zcure as client %d", conn->app_fd, conn->zcure_id);
       }
       else
       {
