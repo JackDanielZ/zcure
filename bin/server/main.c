@@ -402,7 +402,7 @@ _handle_server(Connection *conn, uint8_t is_blocking)
       Client_Header *c_info;
       char *data;
 
-//      LOGGER_INFO("Handle zcure server fd = %d", conn->fd);
+      LOGGER_INFO("Handle zcure server fd = %d", conn->fd);
       memset(&s_info, 0, sizeof(s_info));
 
       rv = recv(conn->fd, &s_info, sizeof(s_info), is_blocking ? MSG_WAITALL : MSG_DONTWAIT);
@@ -463,7 +463,7 @@ _handle_server(Connection *conn, uint8_t is_blocking)
         return 1;
       }
 
-//      LOGGER_INFO("xfer %d bytes from app server %d to zcure client %d", c_info->size, conn->fd, client->fd);
+      LOGGER_INFO("xfer %d bytes from app server %d to zcure client %d", c_info->size, conn->fd, client->fd);
       free(data);
 
       return rv;
@@ -605,7 +605,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       Server2ServerApp_Header *s_info;
       char *data;
 
-//      LOGGER_INFO("Handle zcure client fd = %d", conn->fd);
+      LOGGER_INFO("Handle zcure client fd = %d", conn->fd);
 
       /* Receive the header */
       rv = recv(conn->fd, &c_info, sizeof(Client_Header), is_blocking ? MSG_WAITALL : MSG_DONTWAIT);
@@ -657,7 +657,7 @@ _handle_client(Connection *conn, uint8_t is_blocking)
       if (conn->service)
       {
         rv = send(conn->service->fd, data, sizeof(Server2ServerApp_Header) + c_info.size, MSG_DONTWAIT);
-//        LOGGER_INFO("xfer %d bytes from zcure client %d to app server %d", c_info.size, conn->fd, conn->service->fd);
+        LOGGER_INFO("xfer %d bytes from zcure client %d to app server %d", c_info.size, conn->fd, conn->service->fd);
       }
       else
       {
