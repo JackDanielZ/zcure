@@ -153,7 +153,7 @@ zcure_client_connect(const char *destination, const char *service)
     LOGGER_ERROR("TCP connection failed\n");
     return -1;
   }
-  LOGGER_INFO("TCP connection to %s:%s established\n", server, port);
+  LOGGER_INFO("TCP connection to %s:%s established", server, port);
 
   zcure_data_randomize(sizeof(conn_req), &conn_req);
   strncpy(conn_req.username, username, sizeof(conn_req.username) - 1);
