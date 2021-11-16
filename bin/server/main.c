@@ -686,6 +686,24 @@ _help(const char *prg_name)
   LOGGER_ERROR("%s -p/--port port", prg_name);
 }
 
+static void
+_connection_close(Connection *conn, int epoll_fd)
+{
+  if (!conn) return;
+
+  if (conn->is_server)
+  {
+    LOGGER_INFO("Connection closed with server %s", conn->name);
+  }
+  else
+  {
+    LOGGER_INFO("Connection closed with client %s", conn->name);
+  }
+  close(conn->fd);
+  epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
+  _connection_free(conn);
+}
+
 int main(int argc, char **argv)
 {
   char *permissions_file_content = NULL;
@@ -857,17 +875,7 @@ int main(int argc, char **argv)
 //          LOGGER_INFO("EPOLL event %d fd %d is_server %d events %X", i, conn->fd, conn->is_server, events[i].events);
           if ((events[i].events & EPOLLRDHUP) || (events[i].events & EPOLLHUP))
           {
-            if (conn->is_server)
-            {
-              LOGGER_INFO("Connection closed with server %s", conn->name);
-            }
-            else
-            {
-              LOGGER_INFO("Connection closed with client %s", conn->name);
-            }
-            close(conn->fd);
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
-            _connection_free(conn);
+            _connection_close(conn, epoll_fd);
           }
           else
           {
@@ -877,9 +885,12 @@ int main(int argc, char **argv)
               if (_handle_server(conn, 1) <= 0)
               {
                 LOGGER_INFO("Closing connection with server: Name=%s fd=%d", conn->name ? conn->name : "none", conn->fd);
-                close(conn->fd);
+                _connection_close(conn, epoll_fd);
               }
-              while (_handle_server(conn, 0) > 0);
+              else
+              {
+                while (_handle_server(conn, 0) > 0);
+              }
             }
             else
             {
@@ -887,9 +898,12 @@ int main(int argc, char **argv)
               if (_handle_client(conn, 1) <= 0)
               {
                 LOGGER_INFO("Closing connection with client: Name=%s id=%d fd=%d", conn->name ? conn->name : "none", conn->id, conn->fd);
-                close(conn->fd);
+                _connection_close(conn, epoll_fd);
               }
-              while (_handle_client(conn, 0) > 0);
+              else
+              {
+                while (_handle_client(conn, 0) > 0);
+              }
             }
           }
         }
