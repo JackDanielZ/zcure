@@ -140,6 +140,7 @@ int main(void)
               sprintf(cmd, "curl \"http://dynamicdns.park-your-domain.com/update?domain=%s&host=%s&password=%s&ip=%d.%d.%d.%d\" > /dev/null 2>&1",
                   namecheap_domain, namecheap_name, namecheap_key,
                   notif->ip & 0xFF, (notif->ip >> 8) & 0xFF, (notif->ip >> 16) & 0xFF, notif->ip >> 24);
+              LOGGER_INFO("CURL: %s\n", cmd);
               system(cmd);
             }
           }
