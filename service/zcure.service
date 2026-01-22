@@ -3,8 +3,8 @@ Description=Zcure server
 
 [Service]
 User=$USER
-WorkingDirectory=$HOME
-ExecStart=$PREFIX/bin/zcure_server -p 5210
+WorkingDirectory=/home/$USER
+ExecStart=/usr/bin/zcure_server.py -p 5210
 Restart=always
 
 [Install]

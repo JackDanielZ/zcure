@@ -4,8 +4,8 @@ After=zcure.service
 
 [Service]
 User=$USER
-WorkingDirectory=$HOME
-ExecStart=$PREFIX/bin/zcure_port_forwarder_server transmission:9091
+WorkingDirectory=/home/$USER
+ExecStart=/usr/bin/zcure/zcure_port_forwarder_server.py transmission:9091
 Restart=always
 
 [Install]
