@@ -6,6 +6,8 @@ from common_app import *
 port = 9091
 SERVICE_NAME = f"Port_Fwd_{port}"
 
+debug = False
+
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} user@server:port", file=sys.stderr)
@@ -25,7 +27,7 @@ def main():
         readable, _, _ = select.select(inputs + list(local_to_remote_socks.keys()) + list(remote_to_local_socks.keys()), [], [])
         for sock in readable:
             if sock == local_master_sock:
-                print("Connection from local")
+                if debug == True: print("Connection from local")
                 client_sock, _ = local_master_sock.accept()
                 zcure_sock, shared_key = zcure_client_connect(sys.argv[1], SERVICE_NAME)
                 if zcure_sock == -1:
@@ -38,7 +40,7 @@ def main():
             elif sock in local_to_remote_socks:
                 remote_sock = local_to_remote_socks[sock]
                 data = sock.recv(1000000)
-                print(f"Data from local: {len(data)} bytes, {data}")
+                if debug == True: print(f"Data from local: {len(data)} bytes, {data}")
                 if len(data) == 0:
                     # Remove socket and CID from lists
                     del local_to_remote_socks[sock]
@@ -54,7 +56,7 @@ def main():
                 pkt = AppData()
                 pkt.receive(sock)
                 pkt.decrypt(remote_to_keys[sock])
-                print(f"Data from remote: {len(pkt.data)}, {pkt.data}")
+                if debug == True: print(f"Data from remote: {len(pkt.data)}, {pkt.data}")
                 remote_to_local_socks[sock].sendall(pkt.data)
 
     return 0

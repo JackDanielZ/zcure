@@ -11,7 +11,7 @@ from typing import Dict
 from common_service import *
 from common_app import *
 
-debug = True
+debug = False
 
 class ZcureServer:
     def __init__(self, port: str):

@@ -6,6 +6,8 @@ from common_service import *
 port = 9091
 SERVICE_NAME = f"Port_Fwd_{port}"
 
+debug = False
+
 def main():
     print("[INFO] START")
 
@@ -34,16 +36,16 @@ def main():
                         inputs.append(sock)
                         cid_to_fd[rsp.app_id] = sock
                         fd_to_cid[sock] = rsp.app_id
-                        print(f"New client {rsp.app_id}")
+                        if debug == True: print(f"New client {rsp.app_id}")
                     elif rsp.op == CLIENT_DISCONNECT_NOTIFICATION:
                         # close socket to server and remove from lists
                         inputs.remove(cid_to_fd[rsp.app_id])
                         cid_to_fd[rsp.app_id].close()
-                        print(f"Remove client {rsp.app_id}")
+                        if debug == True: print(f"Remove client {rsp.app_id}")
                     elif rsp.op == CLIENT_DATA:
                         # Send data to server socket
                         cid_to_fd[rsp.app_id].sendall(rsp.data)
-                        print(f"Send data ({len(rsp.data)} bytes) from client {rsp.app_id} to local server")
+                        if debug == True: print(f"Send data ({len(rsp.data)} bytes) from client {rsp.app_id} to local server")
                 else:
                     data = sock.recv(1000000)
                     app_id = fd_to_cid[sock]
@@ -56,7 +58,7 @@ def main():
                         # Send to CID
                         req = ServiceClientData(app_id, data)
                         zcure_server_socket.sendall(req.serialize())
-                        print(f"Send data ({len(data)} bytes) from local server to client {app_id}")
+                        if debug == True: print(f"Send data ({len(data)} bytes) from local server to client {app_id}")
         except Exception as e:
             print(f"[ERROR] {e}")
             exit_required = True
